@@ -1,0 +1,289 @@
+model ProductCategory {
+  id        String            @id @default(uuid())
+  name      String
+  slug      String            @unique
+  parentId  String?
+  parent    ProductCategory?  @relation("ProductCategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children  ProductCategory[] @relation("ProductCategoryTree")
+  isActive  Boolean           @default(true)
+  sortOrder Int               @default(0)
+  subCategories ProductSubCategory[]
+  products      Product[]
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@unique([name, parentId])
+  @@index([parentId])
+  @@index([isActive])
+  @@index([sortOrder])
+}
+
+model ProductSubCategory {
+  id          String          @id @default(uuid())
+  categoryId  String
+  category    ProductCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  name        String
+  slug        String          @unique
+  isActive    Boolean         @default(true)
+  sortOrder   Int             @default(0)
+  products    Product[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@unique([categoryId, name])
+  @@index([categoryId])
+  @@index([isActive])
+  @@index([sortOrder])
+}
+
+model Product {
+  id               String        @id @default(uuid())
+  name             String
+  sku              String        @unique
+  categoryId       String
+  category         ProductCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  subCategoryId    String
+  subCategory      ProductSubCategory @relation(fields: [subCategoryId], references: [id], onDelete: Restrict)
+  model            String?
+  shortDescription String?       @db.Text
+  description      String?       @db.Text
+  price            Decimal       @db.Decimal(10, 2)
+  // salePrice        Decimal?      @db.Decimal(10, 2)
+  shippingCost     Decimal       @default(0) @db.Decimal(10, 2)
+  taxable          TaxMode       @default(TAXABLE)
+  taxRatePercent   Decimal       @default(0) @db.Decimal(5, 2)
+  stockQuantity    Int           @default(0)
+  shippingWeight   Decimal?      @db.Decimal(10, 2)
+  dimensionLength  Decimal?      @db.Decimal(10, 2)
+  dimensionWidth   Decimal?      @db.Decimal(10, 2)
+  dimensionHeight  Decimal?      @db.Decimal(10, 2)
+  warrantyInfo     String?       @db.Text
+  manualPdfUrl     String?
+  tags             String[]
+  specifications   String[]
+  status           ProductStatus @default(ACTIVE)
+  isActive         Boolean       @default(true)
+
+
+  images     ProductImage[]
+  features   ProductFeature[]
+  cartItems  CartItem[]
+  orderItems StoreOrderItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([categoryId])
+  @@index([subCategoryId])
+  @@index([status])
+  @@index([isActive])
+  @@index([name])
+}
+
+model ProductFeature {
+  id         String   @id @default(uuid())
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  iconKey    String?
+  value      String   @db.Text
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([productId])
+  @@index([sortOrder])
+}
+
+model ProductImage {
+  id         String   @id @default(uuid())
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url        String
+  objectKey  String?
+  altText    String?
+  isPrimary  Boolean  @default(false)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@index([productId])
+  @@index([isPrimary])
+  @@index([sortOrder])
+}
+
+model Cart {
+  id        String    @id @default(uuid())
+  userId    String    @unique
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     CartItem[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model CartItem {
+  id         String   @id @default(uuid())
+  cartId     String
+  cart       Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity   Int      @default(1)
+  unitPrice  Decimal  @db.Decimal(10, 2)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([cartId, productId])
+  @@index([productId])
+}
+
+model DiscountCode {
+  id          String       @id @default(uuid())
+  code        String       @unique
+  type        DiscountType
+  value       Decimal      @db.Decimal(10, 2)
+  description String?      @db.Text
+  startsAt    DateTime?
+  endsAt      DateTime?
+  usageLimit  Int?
+  usedCount   Int          @default(0)
+  isActive    Boolean      @default(true)
+
+  storeOrders StoreOrder[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+  @@index([startsAt])
+  @@index([endsAt])
+}
+
+model StoreOrder {
+  id                      String           @id @default(uuid())
+  orderNumber             String           @unique
+  customerId              String
+  customer                User             @relation("StoreOrdersByCustomer", fields: [customerId], references: [id], onDelete: Restrict)
+  status                  StoreOrderStatus @default(PENDING_PAYMENT)
+  shippingAddressId       String?
+  shippingAddress         Address?         @relation("StoreOrderShippingAddress", fields: [shippingAddressId], references: [id], onDelete: SetNull)
+  shippingAddressSnapshot Json
+  billingAddressSnapshot  Json?
+  discountCodeId          String?
+  discountCode            DiscountCode?    @relation(fields: [discountCodeId], references: [id], onDelete: SetNull)
+  subtotalAmount          Decimal          @db.Decimal(10, 2)
+  shippingAmount          Decimal          @default(0) @db.Decimal(10, 2)
+  taxAmount               Decimal          @default(0) @db.Decimal(10, 2)
+  discountAmount          Decimal          @default(0) @db.Decimal(10, 2)
+  totalAmount             Decimal          @db.Decimal(10, 2)
+  notes                   String?          @db.Text
+  placedAt                DateTime         @default(now())
+  paidAt                  DateTime?
+  cancelledAt             DateTime?
+  deliveredAt             DateTime?
+
+  items          StoreOrderItem[]
+  payments       StorePayment[]
+  shipment       StoreShipment?
+  invoice        StoreInvoice?
+  returnRequests StoreReturnRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([status])
+  @@index([placedAt])
+  @@index([shippingAddressId])
+}
+
+model StoreOrderItem {
+  id            String      @id @default(uuid())
+  storeOrderId  String
+  storeOrder    StoreOrder  @relation(fields: [storeOrderId], references: [id], onDelete: Cascade)
+  productId     String?
+  product       Product?    @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productName   String
+  sku           String?
+  model         String?
+  unitPrice     Decimal     @db.Decimal(10, 2)
+  quantity      Int         @default(1)
+  shippingAmount Decimal    @default(0) @db.Decimal(10, 2)
+  taxAmount     Decimal     @default(0) @db.Decimal(10, 2)
+  lineTotal     Decimal     @db.Decimal(10, 2)
+  returnRequests StoreReturnRequest[]
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([storeOrderId])
+  @@index([productId])
+}
+
+model StoreShipment {
+  id               String         @id @default(uuid())
+  storeOrderId     String         @unique
+  storeOrder       StoreOrder     @relation(fields: [storeOrderId], references: [id], onDelete: Cascade)
+  carrier          String         @default("UPS")
+  trackingNumber   String?
+  shipmentDate     DateTime?
+  deliveryEstimate DateTime?
+  deliveredAt      DateTime?
+  status           ShipmentStatus @default(PENDING)
+  notes            String?        @db.Text
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([status])
+  @@index([trackingNumber])
+}
+
+model StorePayment {
+  id              String                 @id @default(uuid())
+  storeOrderId    String
+  storeOrder      StoreOrder             @relation(fields: [storeOrderId], references: [id], onDelete: Cascade)
+  provider        PaymentProvider        @default(STRIPE)
+  eventType       PaymentEventType
+  status          PaymentLifecycleStatus @default(PENDING)
+  paymentIntentId String?
+  chargeId        String?
+  amount          Decimal                @db.Decimal(10, 2)
+  currency        String                 @default("USD")
+  stripePayload   Json?
+  processedAt     DateTime?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  @@index([storeOrderId])
+  @@index([status])
+  @@index([paymentIntentId])
+}
+
+model StoreInvoice {
+  id            String     @id @default(uuid())
+  storeOrderId  String     @unique
+  storeOrder    StoreOrder @relation(fields: [storeOrderId], references: [id], onDelete: Cascade)
+  invoiceNumber String     @unique
+  pdfUrl        String?
+  issuedAt      DateTime   @default(now())
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+}
+
+model StoreReturnRequest {
+  id               String              @id @default(uuid())
+  storeOrderId     String
+  storeOrder       StoreOrder          @relation(fields: [storeOrderId], references: [id], onDelete: Cascade)
+  storeOrderItemId String?
+  storeOrderItem   StoreOrderItem?     @relation(fields: [storeOrderItemId], references: [id], onDelete: SetNull)
+  status           ReturnRequestStatus @default(REQUESTED)
+  reason           String              @db.Text
+  customerNote     String?             @db.Text
+  adminNote        String?             @db.Text
+  requestedAt      DateTime            @default(now())
+  approvedAt       DateTime?
+  rejectedAt       DateTime?
+  refundedAt       DateTime?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  @@index([storeOrderId])
+  @@index([storeOrderItemId])
+  @@index([status])
+}

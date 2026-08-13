@@ -1,0 +1,18 @@
+model Notification {
+  id            String             @id @default(uuid())
+  userId        String?
+  user          User?              @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  title         String
+  body          String             @db.Text
+  channel       NotificationChannel
+  status        NotificationStatus @default(PENDING)
+  referenceType String?
+  referenceId   String?
+  sentAt        DateTime?
+  readAt        DateTime?
+  createdAt     DateTime           @default(now())
+
+  @@index([userId])
+  @@index([status])
+  @@index([channel])
+}

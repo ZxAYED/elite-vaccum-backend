@@ -1,0 +1,2 @@
+// Moved to modular schema files in `prisma/schema/`.
+// Prisma now reads schema from `prisma.config.ts` -> `schema: "prisma/schema"`.

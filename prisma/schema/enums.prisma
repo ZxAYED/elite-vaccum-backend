@@ -1,0 +1,188 @@
+enum Role {
+  CUSTOMER
+  TECHNICIAN
+  ADMIN
+  STAFF
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
+}
+
+enum AddressLabel {
+  HOME
+  WORK
+  OTHER
+  SERVICE
+}
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum TaxMode {
+  TAXABLE
+  NON_TAXABLE
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+enum StoreOrderStatus {
+  PENDING_PAYMENT
+  PAID
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum ShipmentStatus {
+  PENDING
+  LABEL_CREATED
+  SHIPPED
+  IN_TRANSIT
+  DELIVERED
+  RETURNED
+  EXCEPTION
+  CANCELLED
+}
+
+enum PaymentProvider {
+  STRIPE
+}
+
+enum PaymentLifecycleStatus {
+  PENDING
+  AUTHORIZED
+  CAPTURED
+  PARTIALLY_CAPTURED
+  FAILED
+  CANCELLED
+  REFUNDED
+  RELEASED
+}
+
+enum PaymentEventType {
+  AUTHORIZATION
+  CAPTURE
+  REFUND
+  VOID
+  ADJUSTMENT
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+  DOCUMENT
+  PDF
+}
+
+enum ServiceRequestStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  QUOTED
+  QUOTATION_ACCEPTED
+  QUOTATION_REJECTED
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum QuotationStatus {
+  DRAFT
+  SENT
+  VIEWED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CANCELLED
+  SUPERSEDED
+}
+
+enum QuotationLineType {
+  PART
+  SERVICE
+  ADJUSTMENT
+  DISCOUNT
+  OTHER
+}
+
+enum ScheduleStatus {
+  PENDING
+  SCHEDULED
+  RESCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum TechnicianVisitOutcome {
+  FIXED
+  RETURN_VISIT_REQUIRED
+  PARTS_REQUIRED
+  NOT_RESOLVED
+}
+
+enum TechnicianStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum PortType {
+  HDH
+  CHAMELEON
+  CHAMELEON_ELITE
+  STANDARD
+}
+
+enum FloorType {
+  BASEMENT
+  FIRST_FLOOR
+  SECOND_FLOOR
+  OTHER
+}
+
+enum AdditionalFeatureType {
+  VACPAN
+  SPOT_VACUUM
+  WALLY_FLEX
+}
+
+enum ReturnRequestStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  RECEIVED
+  REFUNDED
+  CLOSED
+}
+
+enum NotificationChannel {
+  EMAIL
+  IN_APP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  READ
+}
+
+enum OtpPurpose {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}

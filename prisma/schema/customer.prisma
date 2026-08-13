@@ -1,0 +1,104 @@
+model User {
+  id              String     @id @default(uuid())
+  email           String     @unique
+  passwordHash    String
+  role            Role       @default(CUSTOMER)
+  status          UserStatus @default(ACTIVE)
+  fullName        String
+  phone           String?
+  cellphone       String?
+  companyName     String?
+  notes           String?    @db.Text
+  isEmailVerified Boolean    @default(false)
+  isDeleted       Boolean    @default(false)
+
+  adminProfile      AdminProfile?
+  technicianProfile TechnicianProfile?
+
+  addresses           Address[]
+  cart                Cart?
+  storeOrders         StoreOrder[]       @relation("StoreOrdersByCustomer")
+  serviceRequests     ServiceRequest[]   @relation("ServiceRequestsByCustomer")
+  customerMachines    CustomerMachine[]  @relation("MachineOwner")
+  createdQuotations   ServiceQuotation[] @relation("QuotationCreatedBy")
+  updatedQuotations   ServiceQuotation[] @relation("QuotationUpdatedBy")
+  createdSchedules    ServiceSchedule[]  @relation("ScheduleCreatedBy")
+  updatedSchedules    ServiceSchedule[]  @relation("ScheduleUpdatedBy")
+  assignedSchedules   ServiceSchedule[]  @relation("ScheduleAssignedTechnician")
+  serviceVisits       ServiceVisit[]     @relation("VisitTechnician")
+  completedServices   ServiceCompletion[] @relation("ServiceCompletionAdmin")
+  notifications       Notification[]     @relation("UserNotifications")
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([role])
+  @@index([status])
+  @@index([isDeleted])
+}
+
+model AdminProfile {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  avatarUrl String?
+  bio       String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model TechnicianProfile {
+  id               String   @id @default(uuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status           TechnicianStatus @default(ACTIVE)
+  avatarUrl        String?
+  bio              String?  @db.Text
+  isVerified       Boolean  @default(false)
+  availabilityNote String?  @db.Text
+  documents        Json?
+  specializations  TechnicianSpecialization[]
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([status])
+  @@index([isVerified])
+}
+
+model TechnicianSpecialization {
+  id          String              @id @default(uuid())
+  name        String              @unique
+  technicians TechnicianProfile[]
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+}
+
+model Address {
+  id            String       @id @default(uuid())
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label         AddressLabel @default(HOME)
+  contactName   String?
+  phone         String?
+  addressLine1  String
+  addressLine2  String?
+  city          String
+  state         String
+  zipCode       String
+  country       String       @default("USA")
+  isDefault     Boolean      @default(false)
+  notes         String?      @db.Text
+
+  storeOrdersShipping StoreOrder[]      @relation("StoreOrderShippingAddress")
+  serviceRequests     ServiceRequest[]
+  customerMachines    CustomerMachine[] @relation("MachineInstalledAddress")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([isDefault])
+  @@index([city])
+  @@index([state])
+  @@index([zipCode])
+}
