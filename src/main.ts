@@ -55,6 +55,25 @@ async function bootstrap() {
       .swagger-ui .tab li button.tablinks {
         color: #e5e7eb !important;
       }
+      .swagger-ui .opblock-summary-path,
+      .swagger-ui .opblock-summary-path__deprecated,
+      .swagger-ui .opblock-summary-description,
+      .swagger-ui .opblock-summary-method,
+      .swagger-ui .opblock-control-arrow svg,
+      .swagger-ui .authorization__btn svg,
+      .swagger-ui .opblock .opblock-summary-operation-id,
+      .swagger-ui .opblock .opblock-summary-path a,
+      .swagger-ui .opblock .opblock-summary-path span {
+        color: #f8fafc !important;
+        fill: #f8fafc !important;
+      }
+      .swagger-ui .opblock-summary-path {
+        opacity: 1 !important;
+        font-weight: 600 !important;
+      }
+      .swagger-ui .opblock-summary {
+        border-color: #374151 !important;
+      }
       .swagger-ui .scheme-container,
       .swagger-ui .opblock,
       .swagger-ui .model-container,

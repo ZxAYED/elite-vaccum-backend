@@ -8,34 +8,34 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class SignupDto {
-  @ApiProperty({ example: 'customer@example.com' })
+  @ApiProperty({ example: 'admin@elitecentralvacuum.com' })
   @IsEmail()
   email!: string;
 
-  @ApiProperty({ example: 'StrongPass123!', minLength: 6 })
+  @ApiProperty({ example: 'Admin123!', minLength: 6 })
   @IsString()
   @MinLength(6)
   password!: string;
 
-  @ApiProperty({ example: 'John Doe' })
+  @ApiProperty({ example: 'Elite Admin' })
   @IsString()
   @MinLength(2)
   @MaxLength(120)
   fullName!: string;
 
-  @ApiPropertyOptional({ example: '+1-555-000-1111' })
+  @ApiPropertyOptional({ example: '+1-555-100-1000' })
   @IsOptional()
   @IsString()
   @MaxLength(30)
   phone?: string;
 
-  @ApiPropertyOptional({ example: '+1-555-222-3333' })
+  @ApiPropertyOptional({ example: '+1-555-100-1001' })
   @IsOptional()
   @IsString()
   @MaxLength(30)
   cellphone?: string;
 
-  @ApiPropertyOptional({ example: 'Acme Inc.' })
+  @ApiPropertyOptional({ example: 'Elite Central Vacuum' })
   @IsOptional()
   @IsString()
   @MaxLength(120)

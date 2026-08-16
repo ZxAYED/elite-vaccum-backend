@@ -17,6 +17,7 @@ import { EmailModule } from './email/email.module';
 import { StorageModule } from './storage/storage.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { StoreModule } from './store/store.module';
+import { AiModule } from './ai/ai.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { StoreModule } from './store/store.module';
     EmailModule,
     StorageModule,
     NotificationsModule,
+    AiModule,
     AuthModule,
     CustomersModule,
     TechniciansModule,

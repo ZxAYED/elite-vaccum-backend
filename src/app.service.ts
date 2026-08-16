@@ -4,13 +4,13 @@ import { Injectable } from '@nestjs/common';
 export class AppService {
   getApiInfo() {
     return {
-      name: 'aryegrunzwieg-backend',
+      name: 'elite-vacuum-backend',
       status: 'Purai Pankha',
       timestamp: new Date().toISOString(),
     };
   }
 
   getHello(): string {
-    return 'aryegrunzwieg-backend API is running';
+    return 'Shera Pankha Uris dhuris';
   }
 }
