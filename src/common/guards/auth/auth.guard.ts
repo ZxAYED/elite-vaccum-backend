@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
-import { Prisma, User, UserStatus } from '@prisma/client';
+import { Prisma, User, UserRole } from '@prisma/client';
 import { Request } from 'express';
 import { IS_PUBLIC_KEY, ROLES_KEY } from 'src/common/decorator/rolesDecorator';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -16,8 +16,8 @@ import { PrismaService } from 'src/prisma/prisma.service';
 type AuthenticatedRequestUser = {
   id: string;
   email: string;
-  role: User['role'];
-  status: UserStatus;
+  role: UserRole;
+  isActive: boolean;
 };
 
 @Injectable()
@@ -71,7 +71,7 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException('Unauthorized, invalid token payload');
     }
 
-    let user: Pick<User, 'id' | 'email' | 'role' | 'status' | 'isDeleted'> | null;
+    let user: Pick<User, 'id' | 'email' | 'role' | 'isActive'> | null;
 
     try {
       user = await this.prisma.user.findUnique({
@@ -80,8 +80,7 @@ export class AuthGuard implements CanActivate {
           id: true,
           email: true,
           role: true,
-          status: true,
-          isDeleted: true,
+          isActive: true,
         },
       });
     } catch (error: unknown) {
@@ -102,7 +101,7 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException('Unauthorized, user not found');
     }
 
-    if (user.isDeleted || user.status !== UserStatus.ACTIVE) {
+    if (!user.isActive) {
       throw new UnauthorizedException('Unauthorized, account is inactive');
     }
 
@@ -110,7 +109,7 @@ export class AuthGuard implements CanActivate {
       id: user.id,
       email: user.email,
       role: user.role,
-      status: user.status,
+      isActive: user.isActive,
     };
 
     const requiredRoles = this.reflector.getAllAndOverride<string[]>(

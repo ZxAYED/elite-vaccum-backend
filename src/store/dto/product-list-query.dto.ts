@@ -1,78 +1,142 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { ProductStatus, TaxMode } from '@prisma/client';
-import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import { ProductAvailability, ProductStatus } from '@prisma/client';
+import { Transform, Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 
 export class ProductListQueryDto {
-  @ApiPropertyOptional({ default: 1 })
+  @ApiPropertyOptional({ example: 1, default: 1 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  page?: number;
+  readonly page?: number = 1;
 
-  @ApiPropertyOptional({ default: 10 })
+  @ApiPropertyOptional({ example: 10, default: 10 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  limit?: number;
+  readonly limit?: number = 10;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    example: 'Silent Master',
+    description:
+      'Quick search: searches name, model, part number, SKU, or summary',
+  })
   @IsOptional()
   @IsString()
-  search?: string;
+  readonly search?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    example: 'central-vacuum-units',
+    description: 'Filter by category UUID or unique slug',
+  })
   @IsOptional()
-  @IsUUID()
-  categoryId?: string;
+  @IsString()
+  readonly category?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    example: 'c1234567-89ab-cdef-0123-456789abcdef',
+    description: 'Filter by specific category UUID',
+  })
   @IsOptional()
-  @IsUUID()
-  subCategoryId?: string;
+  @IsString()
+  readonly categoryId?: string;
 
-  @ApiPropertyOptional({ enum: TaxMode })
+  @ApiPropertyOptional({
+    example: 'central-vacuum-units',
+    description: 'Filter by category slug',
+  })
   @IsOptional()
-  @IsEnum(TaxMode)
-  taxable?: TaxMode;
+  @IsString()
+  readonly categorySlug?: string;
 
-  @ApiPropertyOptional({ type: Boolean })
-  @IsOptional()
-  @Type(() => Boolean)
-  isActive?: boolean;
-
-  @ApiPropertyOptional({ enum: ProductStatus })
+  @ApiPropertyOptional({
+    enum: ProductStatus,
+    description: 'Filter by Product status (Admin only: DRAFT, ACTIVE, ARCHIVED)',
+  })
   @IsOptional()
   @IsEnum(ProductStatus)
-  status?: ProductStatus;
+  readonly status?: ProductStatus;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    example: 'in_stock',
+    description:
+      'Filter availability: "all", "in_stock", "special_order", "out_of_stock", or Prisma enum value',
+  })
+  @IsOptional()
+  @IsString()
+  readonly availability?: string;
+
+  @ApiPropertyOptional({
+    example: '0-100',
+    description:
+      'Preset price ranges: "under_50" | "50-150" | "150-300" | "300+" | "0-100" | "101-500" | "501-1000" | "1000+"',
+  })
+  @IsOptional()
+  @IsString()
+  readonly priceRange?: string;
+
+  @ApiPropertyOptional({ example: 100, description: 'Custom minimum price in USD' })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  minPrice?: number;
+  @Min(0)
+  readonly minPrice?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: 2000, description: 'Custom maximum price in USD' })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  maxPrice?: number;
+  @Min(0)
+  readonly maxPrice?: number;
 
-  @ApiPropertyOptional({ enum: ['inStock', 'outOfStock'] })
+  @ApiPropertyOptional({
+    example: 'popularity',
+    description:
+      'Quick sort presets: "popularity" | "price_asc" | "price_desc" | "newest" | "name_asc" | "name_desc"',
+  })
   @IsOptional()
   @IsString()
-  stockState?: 'inStock' | 'outOfStock';
+  readonly sort?: string;
 
-  @ApiPropertyOptional({ enum: ['createdAt', 'updatedAt', 'name', 'price'], default: 'createdAt' })
+  @ApiPropertyOptional({ example: true })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true || value === 1 || value === '1')
+      return true;
+    if (value === 'false' || value === false || value === 0 || value === '0')
+      return false;
+    return undefined;
+  })
+  @IsBoolean()
+  readonly taxable?: boolean;
+
+  @ApiPropertyOptional({
+    example: 'createdAt',
+    enum: [
+      'createdAt',
+      'updatedAt',
+      'name',
+      'priceUsd',
+      'popularityRank',
+      'quantity',
+    ],
+  })
   @IsOptional()
   @IsString()
-  sortBy?: 'createdAt' | 'updatedAt' | 'name' | 'price';
+  readonly sortBy?: string = 'createdAt';
 
-  @ApiPropertyOptional({ enum: ['asc', 'desc'], default: 'desc' })
+  @ApiPropertyOptional({ example: 'desc', enum: ['asc', 'desc'] })
   @IsOptional()
-  @IsString()
-  sortOrder?: 'asc' | 'desc';
+  @IsEnum(['asc', 'desc'])
+  readonly sortOrder?: 'asc' | 'desc' = 'desc';
 }
-

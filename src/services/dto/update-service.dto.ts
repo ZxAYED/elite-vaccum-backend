@@ -1,5 +1,12 @@
 import { PartialType } from '@nestjs/swagger';
-import { IsBoolean, IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsNumber,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { CreateServiceDto } from './create-service.dto';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 

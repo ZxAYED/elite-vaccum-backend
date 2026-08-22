@@ -1,4 +1,8 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma, Role, UserStatus } from '@prisma/client';
 import { getPagination } from '../common/utils/pagination';
 import { PrismaService } from '../prisma/prisma.service';
@@ -59,7 +63,9 @@ export class CustomersService {
       actor.role === Role.CUSTOMER &&
       actor.id !== customer.id
     ) {
-      throw new ForbiddenException('You can only access your own customer profile');
+      throw new ForbiddenException(
+        'You can only access your own customer profile',
+      );
     }
 
     return customer;
@@ -171,7 +177,11 @@ export class CustomersService {
     };
   }
 
-  async update(id: string, updateCustomerDto: UpdateCustomerDto, actor?: Actor) {
+  async update(
+    id: string,
+    updateCustomerDto: UpdateCustomerDto,
+    actor?: Actor,
+  ) {
     const existing = await this.findCustomerOrThrow(id, actor);
 
     return this.prisma.user.update({
@@ -180,7 +190,9 @@ export class CustomersService {
         ...(updateCustomerDto.name
           ? { fullName: updateCustomerDto.name.trim() }
           : {}),
-        ...(updateCustomerDto.email ? { email: updateCustomerDto.email.trim().toLowerCase() } : {}),
+        ...(updateCustomerDto.email
+          ? { email: updateCustomerDto.email.trim().toLowerCase() }
+          : {}),
         ...(updateCustomerDto.phone !== undefined
           ? { phone: updateCustomerDto.phone?.trim() || null }
           : {}),
@@ -193,7 +205,8 @@ export class CustomersService {
         ...(this.isAdminRole(actor?.role ?? '') && updateCustomerDto.status
           ? { status: updateCustomerDto.status }
           : {}),
-        ...(this.isAdminRole(actor?.role ?? '') && updateCustomerDto.isDeleted !== undefined
+        ...(this.isAdminRole(actor?.role ?? '') &&
+        updateCustomerDto.isDeleted !== undefined
           ? { isDeleted: updateCustomerDto.isDeleted }
           : {}),
       },

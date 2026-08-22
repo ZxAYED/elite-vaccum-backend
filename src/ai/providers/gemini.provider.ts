@@ -23,8 +23,7 @@ export class GeminiProvider {
     });
 
     this.model =
-      this.configService.get<string>('GEMINI_MODEL') ??
-      'gemini-3.6-flash';
+      this.configService.get<string>('GEMINI_MODEL') ?? 'gemini-3.6-flash';
   }
 
   async generateText(message: string): Promise<string> {

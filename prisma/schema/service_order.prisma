@@ -1,0 +1,74 @@
+// ==========================================
+// 7. SERVICE ORDERS, SCHEDULING & FIELD WORKFLOW
+// ==========================================
+
+model ServiceOrder {
+  id                   String             @id @default(uuid()) @db.Uuid
+  businessId           String             @unique @map("business_id") @db.VarChar(50) // SO-XXXXX
+  serviceRequestId     String             @unique @map("service_request_id") @db.Uuid
+  quotationId          String?            @map("quotation_id") @db.Uuid
+  customerId           String             @map("customer_id") @db.Uuid
+  assignedTechnicianId String?            @map("assigned_technician_id") @db.Uuid
+  serviceAddressId     String?            @map("service_address_id") @db.Uuid
+  status               ServiceOrderStatus @default(SCHEDULED)
+  scheduledAt          DateTime           @map("scheduled_at") @db.Timestamptz
+  estimatedDurationMin Int                @default(60) @map("estimated_duration_min")
+  totalUsd             Decimal            @map("total_usd") @db.Decimal(10, 2)
+  summary              String             @db.Text
+  customerNotes        String?            @map("customer_notes") @db.Text
+  adminInstructions    String?            @map("admin_instructions") @db.Text
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+
+  serviceRequest ServiceRequest              @relation(fields: [serviceRequestId], references: [id], onDelete: Restrict)
+  quotation      Quotation?                  @relation("ServiceOrderQuotation")
+  customer       Customer                    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  technician     Technician?                 @relation("TechnicianAssignedJobs", fields: [assignedTechnicianId], references: [id], onDelete: SetNull)
+  addressRef     CustomerAddress?            @relation("ServiceOrderAddress", fields: [serviceAddressId], references: [id], onDelete: SetNull)
+  statusHistory  ServiceOrderStatusHistory[]
+  etas           TechnicianEta[]
+  serviceReport  TechnicianServiceReport?
+  appointments   Appointment[]
+  invoices       Invoice[]
+  reviews        CustomerReview[]
+
+  @@index([customerId, status])
+  @@index([assignedTechnicianId, scheduledAt])
+  @@map("service_orders")
+}
+
+model ServiceOrderStatusHistory {
+  id             String             @id @default(uuid()) @db.Uuid
+  serviceOrderId String             @map("service_order_id") @db.Uuid
+  fromStatus     ServiceOrderStatus @map("from_status")
+  toStatus       ServiceOrderStatus @map("to_status")
+  note           String?            @db.Text
+  actorLabel     String             @map("actor_label") @db.VarChar(100)
+  changedAt      DateTime           @default(now()) @map("changed_at") @db.Timestamptz
+
+  serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+
+  @@index([serviceOrderId, changedAt])
+  @@map("service_order_status_history")
+}
+
+model Appointment {
+  id               String   @id @default(uuid()) @db.Uuid
+  serviceOrderId   String?  @map("service_order_id") @db.Uuid
+  serviceRequestId String   @map("service_request_id") @db.Uuid
+  technicianId     String?  @map("technician_id") @db.Uuid
+  status           String   @default("CONFIRMED") @db.VarChar(50)
+  startAt          DateTime @map("start_at") @db.Timestamptz
+  endAt            DateTime @map("end_at") @db.Timestamptz
+  addressSnapshot  Json     @map("address_snapshot")
+  notes            String?  @db.Text
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  serviceOrder   ServiceOrder?  @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+  technician     Technician?    @relation(fields: [technicianId], references: [id], onDelete: SetNull)
+
+  @@index([technicianId, startAt])
+  @@map("appointments")
+}

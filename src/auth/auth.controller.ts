@@ -40,7 +40,9 @@ export class AuthController {
     description: 'Signup succeeded and an email verification OTP was sent.',
     type: MessageResponseDto,
   })
-  @ApiConflictResponse({ description: 'Email already exists or account is not usable.' })
+  @ApiConflictResponse({
+    description: 'Email already exists or account is not usable.',
+  })
   @ApiBadRequestResponse({ description: 'Invalid signup payload.' })
   signup(@Body() dto: SignupDto) {
     return this.auth.signup(dto);
@@ -55,7 +57,9 @@ export class AuthController {
     type: MessageResponseDto,
   })
   @ApiNotFoundResponse({ description: 'User not found.' })
-  @ApiConflictResponse({ description: 'User is already verified or account is not active.' })
+  @ApiConflictResponse({
+    description: 'User is already verified or account is not active.',
+  })
   resendOtp(@Body() dto: ResendOtpDto) {
     return this.auth.resendRegistrationOtp(dto);
   }
@@ -69,21 +73,28 @@ export class AuthController {
     type: MessageResponseDto,
   })
   @ApiNotFoundResponse({ description: 'User not found.' })
-  @ApiConflictResponse({ description: 'OTP is invalid/expired or account cannot be verified.' })
+  @ApiConflictResponse({
+    description: 'OTP is invalid/expired or account cannot be verified.',
+  })
   verifyOtp(@Body() dto: VerifyOtpDto) {
     return this.auth.verifyRegistrationOtp(dto);
   }
 
   @Public()
   @Post('login')
-  @ApiOperation({ summary: 'Authenticate a user and issue access/refresh tokens' })
+  @ApiOperation({
+    summary: 'Authenticate a user and issue access/refresh tokens',
+  })
   @ApiBody({ type: LoginDto })
   @ApiOkResponse({
     description: 'Login successful.',
     type: AuthTokensResponseDto,
   })
   @ApiNotFoundResponse({ description: 'User not found.' })
-  @ApiUnauthorizedResponse({ description: 'Invalid credentials or account is not allowed to authenticate.' })
+  @ApiUnauthorizedResponse({
+    description:
+      'Invalid credentials or account is not allowed to authenticate.',
+  })
   login(@Body() dto: LoginDto, @Req() req: Request) {
     const ip = req.ip;
     const userAgent = req.headers['user-agent'];
@@ -99,7 +110,9 @@ export class AuthController {
     type: MessageResponseDto,
   })
   @ApiNotFoundResponse({ description: 'User not found.' })
-  @ApiUnauthorizedResponse({ description: 'Account is not eligible for password reset.' })
+  @ApiUnauthorizedResponse({
+    description: 'Account is not eligible for password reset.',
+  })
   forgotPassword(@Body() dto: ForgotPasswordDto) {
     return this.auth.forgotPassword(dto);
   }
@@ -114,7 +127,9 @@ export class AuthController {
   })
   @ApiNotFoundResponse({ description: 'User not found.' })
   @ApiConflictResponse({ description: 'OTP is invalid or expired.' })
-  @ApiUnauthorizedResponse({ description: 'Account is not eligible for password reset.' })
+  @ApiUnauthorizedResponse({
+    description: 'Account is not eligible for password reset.',
+  })
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.auth.resetPassword(dto);
   }
@@ -127,7 +142,9 @@ export class AuthController {
     description: 'Token refresh successful.',
     type: AuthTokensResponseDto,
   })
-  @ApiUnauthorizedResponse({ description: 'Refresh token is invalid or expired.' })
+  @ApiUnauthorizedResponse({
+    description: 'Refresh token is invalid or expired.',
+  })
   refreshToken(@Body() dto: RefreshTokenDto) {
     return this.auth.refreshToken(dto);
   }
@@ -152,7 +169,10 @@ export class AuthController {
     description: 'Password changed successfully.',
     type: MessageResponseDto,
   })
-  @ApiUnauthorizedResponse({ description: 'Missing token, invalid old password, or account cannot authenticate.' })
+  @ApiUnauthorizedResponse({
+    description:
+      'Missing token, invalid old password, or account cannot authenticate.',
+  })
   changePassword(
     @Body() dto: ChangePasswordDto,
     @Req() req: { user?: { id?: string } },

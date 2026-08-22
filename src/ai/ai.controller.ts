@@ -22,14 +22,10 @@ import { ServiceIntakeDto } from './dto/service-intake.dto';
 @ApiBearerAuth('bearer')
 @Controller('ai')
 export class AiController {
-  constructor(private readonly aiService: AiService) { }
-
+  constructor(private readonly aiService: AiService) {}
 
   @Post('chat/stream')
-  @Roles(UserRole.ADMIN,
-    UserRole.STAFF,
-    UserRole.CUSTOMER,
-    UserRole.TECHNICIAN,)
+  @Roles(UserRole.ADMIN, UserRole.STAFF, UserRole.CUSTOMER, UserRole.TECHNICIAN)
   @ApiOperation({ summary: 'Stream a Gemini response' })
   @ApiBody({ type: ChatDto })
   async streamChat(
@@ -53,13 +49,9 @@ export class AiController {
       res.write(`event: done\ndata: [DONE]\n\n`);
     } catch (error: unknown) {
       const message =
-        error instanceof Error
-          ? error.message
-          : 'Streaming failed';
+        error instanceof Error ? error.message : 'Streaming failed';
 
-      res.write(
-        `event: error\ndata: ${JSON.stringify({ message })}\n\n`,
-      );
+      res.write(`event: error\ndata: ${JSON.stringify({ message })}\n\n`);
     } finally {
       res.end();
     }
@@ -71,16 +63,8 @@ export class AiController {
     });
   }
 
-
-
-
   @Post('chat')
-  @Roles(
-    UserRole.ADMIN,
-    UserRole.STAFF,
-    UserRole.CUSTOMER,
-    UserRole.TECHNICIAN,
-  )
+  @Roles(UserRole.ADMIN, UserRole.STAFF, UserRole.CUSTOMER, UserRole.TECHNICIAN)
   @ApiOperation({ summary: 'Send a chat prompt to the configured AI provider' })
   @ApiBody({ type: ChatDto })
   @ApiOkResponse({
@@ -89,18 +73,15 @@ export class AiController {
   })
   @ApiBadRequestResponse({ description: 'Invalid AI chat payload.' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid access token.' })
-  @ApiServiceUnavailableResponse({ description: 'AI provider is unavailable or not configured.' })
+  @ApiServiceUnavailableResponse({
+    description: 'AI provider is unavailable or not configured.',
+  })
   chat(@Body() dto: ChatDto) {
     return this.aiService.chat(dto.message);
   }
 
-
   @Post('service-intake')
-  @Roles(
-    UserRole.CUSTOMER,
-    UserRole.ADMIN,
-    UserRole.STAFF,
-  )
+  @Roles(UserRole.CUSTOMER, UserRole.ADMIN, UserRole.STAFF)
   @ApiOperation({
     summary: 'Analyze a customer service problem',
   })
@@ -108,5 +89,4 @@ export class AiController {
   analyzeServiceIntake(@Body() dto: ServiceIntakeDto) {
     return this.aiService.analyzeServiceIntake(dto.message);
   }
-
 }

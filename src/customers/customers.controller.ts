@@ -18,7 +18,7 @@ import { ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 @ApiBearerAuth('bearer')
 @Controller('customers')
 export class CustomersController {
-  constructor(private readonly customersService: CustomersService) { }
+  constructor(private readonly customersService: CustomersService) {}
 
   @Get()
   @Roles('ADMIN')
@@ -64,7 +64,10 @@ export class CustomersController {
   @Get(':id')
   @ApiOperation({ summary: 'Get a customer by ID' })
   @Roles('ADMIN', 'CUSTOMER')
-  findOne(@Param('id') id: string, @Req() req: { user?: { id: string; role: string } }) {
+  findOne(
+    @Param('id') id: string,
+    @Req() req: { user?: { id: string; role: string } },
+  ) {
     return this.customersService.findOne(id, req.user);
   }
 

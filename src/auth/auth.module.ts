@@ -21,7 +21,7 @@ import { AuthService } from './auth.service';
           secret,
           signOptions: {
             expiresIn: (config.get<string>('JWT_EXPIRES_IN') ??
-              '15m') as StringValue,
+              '1d') as StringValue,
           },
         };
       },

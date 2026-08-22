@@ -13,5 +13,6 @@ import { ServiceSchedulesService } from './service-schedules.service';
     ServiceQuotationsService,
     ServiceSchedulesService,
   ],
+  exports: [ServiceCatalogService],
 })
 export class ServicesModule {}

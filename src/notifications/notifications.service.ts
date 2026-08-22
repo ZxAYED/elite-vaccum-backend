@@ -45,7 +45,9 @@ export class NotificationsService {
           title: params.title,
           body: params.body,
           channel: NotificationChannel.EMAIL,
-          status: result.success ? NotificationStatus.SENT : NotificationStatus.FAILED,
+          status: result.success
+            ? NotificationStatus.SENT
+            : NotificationStatus.FAILED,
           sentAt: result.success ? new Date() : undefined,
           referenceType: params.referenceType,
           referenceId: params.referenceId,

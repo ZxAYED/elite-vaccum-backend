@@ -7,7 +7,13 @@ import {
   Param,
   Query,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiQuery, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiQuery,
+  ApiBody,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { TechnicianStatus } from '@prisma/client';
 import { Roles } from '../common/decorator/rolesDecorator';
 import { TechniciansService } from './technicians.service';

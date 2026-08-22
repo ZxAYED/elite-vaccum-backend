@@ -27,7 +27,10 @@ export class CreateServiceQuotationDto {
   @IsString()
   notes?: string;
 
-  @ApiPropertyOptional({ example: 24, description: 'Quotation validity in hours' })
+  @ApiPropertyOptional({
+    example: 24,
+    description: 'Quotation validity in hours',
+  })
   @IsOptional()
   @IsNumber()
   @Min(1)

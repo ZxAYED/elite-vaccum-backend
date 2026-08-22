@@ -21,7 +21,9 @@ export class EmailService {
     const smtpHost =
       this.configService.get<string>('AWS_SES_SMTP_HOST') ??
       'email-smtp.us-east-1.amazonaws.com';
-    const smtpPort = Number(this.configService.get<string>('AWS_SES_SMTP_PORT') ?? 587);
+    const smtpPort = Number(
+      this.configService.get<string>('AWS_SES_SMTP_PORT') ?? 587,
+    );
 
     if (!smtpUser || !smtpPass || Number.isNaN(smtpPort)) {
       return null;
@@ -66,7 +68,8 @@ export class EmailService {
         messageId: info.messageId,
       };
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Email send error';
+      const message =
+        error instanceof Error ? error.message : 'Email send error';
       this.logger.error(`Email send failed: ${message}`);
       return {
         success: false,
@@ -106,7 +109,11 @@ export class EmailService {
     });
   }
 
-  async sendAccountEmail(params: { to: string; subject: string; message: string }) {
+  async sendAccountEmail(params: {
+    to: string;
+    subject: string;
+    message: string;
+  }) {
     return this.sendTemplateEmail({
       to: params.to,
       template: EmailTemplateKey.ACCOUNT_EVENT,
@@ -117,7 +124,11 @@ export class EmailService {
     });
   }
 
-  async sendServiceRequestEmail(params: { to: string; subject: string; message: string }) {
+  async sendServiceRequestEmail(params: {
+    to: string;
+    subject: string;
+    message: string;
+  }) {
     return this.sendTemplateEmail({
       to: params.to,
       template: EmailTemplateKey.SERVICE_REQUEST,
@@ -128,7 +139,11 @@ export class EmailService {
     });
   }
 
-  async sendOrderEmail(params: { to: string; subject: string; message: string }) {
+  async sendOrderEmail(params: {
+    to: string;
+    subject: string;
+    message: string;
+  }) {
     return this.sendTemplateEmail({
       to: params.to,
       template: EmailTemplateKey.ORDER_EVENT,
@@ -139,7 +154,11 @@ export class EmailService {
     });
   }
 
-  async sendPaymentEmail(params: { to: string; subject: string; message: string }) {
+  async sendPaymentEmail(params: {
+    to: string;
+    subject: string;
+    message: string;
+  }) {
     return this.sendTemplateEmail({
       to: params.to,
       template: EmailTemplateKey.PAYMENT_EVENT,
@@ -150,7 +169,11 @@ export class EmailService {
     });
   }
 
-  async sendQuotationEmail(params: { to: string; subject: string; message: string }) {
+  async sendQuotationEmail(params: {
+    to: string;
+    subject: string;
+    message: string;
+  }) {
     return this.sendTemplateEmail({
       to: params.to,
       template: EmailTemplateKey.QUOTATION_EVENT,
@@ -161,7 +184,11 @@ export class EmailService {
     });
   }
 
-  async sendScheduleEmail(params: { to: string; subject: string; message: string }) {
+  async sendScheduleEmail(params: {
+    to: string;
+    subject: string;
+    message: string;
+  }) {
     return this.sendTemplateEmail({
       to: params.to,
       template: EmailTemplateKey.SCHEDULE_EVENT,

@@ -1,24 +1,26 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, ProductStatus, Role } from '@prisma/client';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma, ProductStatus, UserRole } from '@prisma/client';
+import { RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { getPagination } from 'src/common/utils/pagination';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { CategoryListQueryDto } from '../dto/category-list-query.dto';
 import { CreateCategoryDto } from '../dto/create-category.dto';
-import { CreateSubCategoryDto } from '../dto/create-subcategory.dto';
-import { ProductListQueryDto } from '../dto/product-list-query.dto';
 import { UpdateCategoryDto } from '../dto/update-category.dto';
-import { UpdateSubCategoryDto } from '../dto/update-subcategory.dto';
-
-type Actor = { id: string; role: string };
 
 @Injectable()
 export class StoreCategoriesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private isAdmin(actor?: Actor) {
-    return actor?.role === Role.ADMIN || actor?.role === Role.STAFF;
+  private isAdmin(user?: RequestUser | null): boolean {
+    return user?.role === UserRole.ADMIN;
   }
 
-  private toSlug(input: string) {
+  private toSlug(input: string): string {
     return input
       .toLowerCase()
       .trim()
@@ -27,196 +29,237 @@ export class StoreCategoriesService {
       .replace(/-+/g, '-');
   }
 
-  private productInclude() {
-    return {
-      category: { select: { id: true, name: true, slug: true } },
-      subCategory: { select: { id: true, name: true, slug: true } },
-      images: { orderBy: [{ isPrimary: 'desc' }, { sortOrder: 'asc' }] },
-      features: { orderBy: { sortOrder: 'asc' } },
-    } satisfies Prisma.ProductInclude;
-  }
+  private async generateUniqueCategorySlug(
+    name: string,
+    excludeId?: string,
+  ): Promise<string> {
+    const baseSlug = this.toSlug(name) || 'category';
+    let candidate = baseSlug;
+    let counter = 1;
 
-  createCategory(dto: CreateCategoryDto, actor?: Actor) {
-    return (async () => {
-      if (!this.isAdmin(actor)) {
-        throw new ForbiddenException('Only admin/staff can create categories');
-      }
-      const slug = dto.slug ? this.toSlug(dto.slug) : this.toSlug(dto.name);
-      return this.prisma.productCategory.create({
-        data: {
-          name: dto.name.trim(),
-          slug,
-          parentId: dto.parentId,
-          isActive: dto.isActive ?? true,
-          sortOrder: dto.sortOrder ?? 0,
-        },
+    while (true) {
+      const existing = await this.prisma.productCategory.findUnique({
+        where: { slug: candidate },
+        select: { id: true },
       });
-    })();
+
+      if (!existing || existing.id === excludeId) {
+        return candidate;
+      }
+
+      candidate = `${baseSlug}-${counter}`;
+      counter++;
+    }
   }
 
-  getCategories(actor?: Actor) {
-    const admin = this.isAdmin(actor);
-    return this.prisma.productCategory.findMany({
-      where: admin ? {} : { isActive: true },
-      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+  async createCategory(dto: CreateCategoryDto, user?: RequestUser | null) {
+    const slug = dto.slug
+      ? this.toSlug(dto.slug)
+      : await this.generateUniqueCategorySlug(dto.name);
+
+    const slugExists = await this.prisma.productCategory.findUnique({
+      where: { slug },
+      select: { id: true },
+    });
+
+    if (slugExists) {
+      throw new ConflictException(`Category slug '${slug}' is already in use`);
+    }
+
+    return this.prisma.productCategory.create({
+      data: {
+        name: dto.name.trim(),
+        slug,
+        description: dto.description?.trim() || null,
+        status: dto.status?.toUpperCase() || 'ACTIVE',
+        sortOrder: dto.sortOrder ?? 0,
+      },
       include: {
-        children: {
-          where: admin ? {} : { isActive: true },
-          orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-        },
-        subCategories: {
-          where: admin ? {} : { isActive: true },
-          orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+        _count: {
+          select: {
+            products: {
+              where: { status: ProductStatus.ACTIVE },
+            },
+          },
         },
       },
     });
   }
 
-  getAdminCategoryTree(actor?: Actor) {
-    if (!this.isAdmin(actor)) throw new ForbiddenException('Only admin/staff can view admin tree');
-    return this.getCategories(actor);
-  }
+  async getCategories(query: CategoryListQueryDto, user?: RequestUser | null) {
+    const admin = this.isAdmin(user);
+    const where: Prisma.ProductCategoryWhereInput = {
+      ...(admin
+        ? query.status
+          ? { status: query.status.toUpperCase() }
+          : {}
+        : { status: 'ACTIVE' }),
+      ...(query.search
+        ? {
+            OR: [
+              { name: { contains: query.search, mode: 'insensitive' } },
+              { description: { contains: query.search, mode: 'insensitive' } },
+              { slug: { contains: query.search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
 
-  getCategoryById(id: string, actor?: Actor) {
-    return (async () => {
-      const category = await this.prisma.productCategory.findUnique({
-        where: { id },
-        include: {
-          children: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] },
-          subCategories: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] },
+    const totalItems = await this.prisma.productCategory.count({ where });
+    const { skip, take, meta } = getPagination(
+      query.page,
+      query.limit,
+      totalItems,
+    );
+
+    const orderByField = query.sortBy || 'sortOrder';
+    const orderDirection = query.sortOrder || 'asc';
+
+    // Count active products for UI badges (e.g. Central Vacuum Units (12))
+    const items = await this.prisma.productCategory.findMany({
+      where,
+      skip,
+      take,
+      orderBy: {
+        [orderByField]: orderDirection,
+      },
+      include: {
+        _count: {
+          select: {
+            products: {
+              where: admin ? undefined : { status: ProductStatus.ACTIVE },
+            },
+          },
         },
-      });
-      if (!category) throw new NotFoundException('Category not found');
-      if (!this.isAdmin(actor) && !category.isActive) {
-        throw new NotFoundException('Category not found');
-      }
-      return category;
-    })();
+      },
+    });
+
+    // Also calculate the global active products count across all categories for "All categories (32)" badge
+    const totalActiveProducts = await this.prisma.product.count({
+      where: admin
+        ? undefined
+        : {
+            status: ProductStatus.ACTIVE,
+            category: { status: 'ACTIVE' },
+          },
+    });
+
+    return {
+      items,
+      totalActiveProducts,
+      meta,
+    };
   }
 
-  updateCategory(id: string, dto: UpdateCategoryDto, actor?: Actor) {
-    return (async () => {
-      if (!this.isAdmin(actor)) {
-        throw new ForbiddenException('Only admin/staff can update categories');
-      }
-      await this.getCategoryById(id, actor);
-      return this.prisma.productCategory.update({
-        where: { id },
-        data: {
-          ...(dto.name ? { name: dto.name.trim() } : {}),
-          ...(dto.slug ? { slug: this.toSlug(dto.slug) } : {}),
-          ...(dto.parentId !== undefined ? { parentId: dto.parentId } : {}),
-          ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
-          ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
+  async getCategoryById(idOrSlug: string, user?: RequestUser | null) {
+    const isUuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        idOrSlug,
+      );
+
+    const category = await this.prisma.productCategory.findFirst({
+      where: isUuid ? { id: idOrSlug } : { slug: idOrSlug },
+      include: {
+        _count: {
+          select: {
+            products: {
+              where: this.isAdmin(user)
+                ? undefined
+                : { status: ProductStatus.ACTIVE },
+            },
+          },
         },
-      });
-    })();
+      },
+    });
+
+    if (!category) {
+      throw new NotFoundException(`Category '${idOrSlug}' not found`);
+    }
+
+    if (category.status !== 'ACTIVE' && !this.isAdmin(user)) {
+      throw new NotFoundException(`Category '${idOrSlug}' is inactive`);
+    }
+
+    return category;
   }
 
-  deleteCategory(id: string, actor?: Actor) {
-    return (async () => {
-      if (!this.isAdmin(actor)) throw new ForbiddenException('Only admin/staff can delete categories');
+  async updateCategory(
+    id: string,
+    dto: UpdateCategoryDto,
+    user?: RequestUser | null,
+  ) {
+    const existing = await this.prisma.productCategory.findUnique({
+      where: { id },
+    });
 
-      const linkedProducts = await this.prisma.product.count({ where: { categoryId: id } });
-      const linkedSubCategories = await this.prisma.productSubCategory.count({ where: { categoryId: id } });
-      const linkedChildren = await this.prisma.productCategory.count({ where: { parentId: id } });
-      if (linkedProducts > 0 || linkedSubCategories > 0 || linkedChildren > 0) {
-        await this.prisma.productCategory.update({ where: { id }, data: { isActive: false } });
-        return { message: 'Category deactivated because it has linked records' };
-      }
-      await this.prisma.productCategory.delete({ where: { id } });
-      return { message: 'Category deleted successfully' };
-    })();
-  }
+    if (!existing) {
+      throw new NotFoundException(`Category with ID '${id}' not found`);
+    }
 
-  createSubCategory(dto: CreateSubCategoryDto, actor?: Actor) {
-    return (async () => {
-      if (!this.isAdmin(actor)) {
-        throw new ForbiddenException('Only admin/staff can create subcategories');
-      }
-      const category = await this.prisma.productCategory.findUnique({
-        where: { id: dto.categoryId },
+    let slug = existing.slug;
+    if (dto.slug && dto.slug !== existing.slug) {
+      slug = this.toSlug(dto.slug);
+      const conflict = await this.prisma.productCategory.findUnique({
+        where: { slug },
         select: { id: true },
       });
-      if (!category) throw new BadRequestException('Category not found');
-
-      const slug = dto.slug ? this.toSlug(dto.slug) : this.toSlug(dto.name);
-      return this.prisma.productSubCategory.create({
-        data: {
-          name: dto.name.trim(),
-          slug,
-          categoryId: dto.categoryId,
-          isActive: dto.isActive ?? true,
-          sortOrder: dto.sortOrder ?? 0,
-        },
-      });
-    })();
-  }
-
-  updateSubCategory(id: string, dto: UpdateSubCategoryDto, actor?: Actor) {
-    return (async () => {
-      if (!this.isAdmin(actor)) throw new ForbiddenException('Only admin/staff can update subcategories');
-      const existing = await this.prisma.productSubCategory.findUnique({ where: { id } });
-      if (!existing) throw new NotFoundException('Subcategory not found');
-      if (dto.categoryId) {
-        const category = await this.prisma.productCategory.findUnique({ where: { id: dto.categoryId } });
-        if (!category) throw new BadRequestException('Category not found');
+      if (conflict && conflict.id !== id) {
+        throw new ConflictException(`Category slug '${slug}' is already taken`);
       }
-      return this.prisma.productSubCategory.update({
-        where: { id },
-        data: {
-          ...(dto.name ? { name: dto.name.trim() } : {}),
-          ...(dto.slug ? { slug: this.toSlug(dto.slug) } : {}),
-          ...(dto.categoryId ? { categoryId: dto.categoryId } : {}),
-          ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
-          ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
-        },
-      });
-    })();
-  }
+    } else if (dto.name && dto.name !== existing.name && !dto.slug) {
+      slug = await this.generateUniqueCategorySlug(dto.name, id);
+    }
 
-  deleteSubCategory(id: string, actor?: Actor) {
-    return (async () => {
-      if (!this.isAdmin(actor)) throw new ForbiddenException('Only admin/staff can delete subcategories');
-      const linkedProducts = await this.prisma.product.count({ where: { subCategoryId: id } });
-      if (linkedProducts > 0) {
-        await this.prisma.productSubCategory.update({ where: { id }, data: { isActive: false } });
-        return { message: 'Subcategory deactivated because it has linked products' };
-      }
-      await this.prisma.productSubCategory.delete({ where: { id } });
-      return { message: 'Subcategory deleted successfully' };
-    })();
-  }
-
-  getCategoryProducts(id: string, query: ProductListQueryDto, actor?: Actor) {
-    return (async () => {
-      const category = await this.prisma.productCategory.findUnique({ where: { id }, select: { id: true } });
-      if (!category) throw new NotFoundException('Category not found');
-      const admin = this.isAdmin(actor);
-      const where: Prisma.ProductWhereInput = {
-        ...(admin ? {} : { isActive: true, status: ProductStatus.ACTIVE }),
-        categoryId: id,
-        ...(query.search
-          ? {
-              OR: [
-                { name: { contains: query.search, mode: 'insensitive' } },
-                { sku: { contains: query.search, mode: 'insensitive' } },
-                { model: { contains: query.search, mode: 'insensitive' } },
-              ],
-            }
+    return this.prisma.productCategory.update({
+      where: { id },
+      data: {
+        ...(dto.name ? { name: dto.name.trim() } : {}),
+        ...(slug ? { slug } : {}),
+        ...(dto.description !== undefined
+          ? { description: dto.description?.trim() || null }
           : {}),
-        ...(query.subCategoryId ? { subCategoryId: query.subCategoryId } : {}),
-      };
-      const totalItems = await this.prisma.product.count({ where });
-      const pagination = getPagination(query.page, query.limit, totalItems);
-      const data = await this.prisma.product.findMany({
-        where,
-        skip: pagination.skip,
-        take: pagination.take,
-        orderBy: { createdAt: 'desc' },
-        include: this.productInclude(),
-      });
-      return { data, meta: pagination.meta };
-    })();
+        ...(dto.status ? { status: dto.status.toUpperCase() } : {}),
+        ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
+      },
+      include: {
+        _count: {
+          select: {
+            products: {
+              where: { status: ProductStatus.ACTIVE },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  async deleteCategory(id: string, user?: RequestUser | null) {
+    const existing = await this.prisma.productCategory.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: { products: true },
+        },
+      },
+    });
+
+    if (!existing) {
+      throw new NotFoundException(`Category with ID '${id}' not found`);
+    }
+
+    if (existing._count.products > 0) {
+      throw new ConflictException(
+        `Cannot delete category with ${existing._count.products} associated product(s). Please reassign or delete the products first, or mark category status as INACTIVE.`,
+      );
+    }
+
+    await this.prisma.productCategory.delete({
+      where: { id },
+    });
+
+    return {
+      success: true,
+      message: `Category '${existing.name}' deleted successfully`,
+    };
   }
 }

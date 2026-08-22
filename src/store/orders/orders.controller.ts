@@ -1,73 +1,153 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Roles } from 'src/common/decorator/rolesDecorator';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import {
+  CurrentUser,
+  RequestUser,
+} from 'src/common/decorator/currentUser.decorator';
+import { Public, Roles } from 'src/common/decorator/rolesDecorator';
+import { AuthGuard } from 'src/common/guards/auth/auth.guard';
 import { CreateOrderDto } from '../dto/create-order.dto';
 import { OrderListQueryDto } from '../dto/order-list-query.dto';
-import { UpdateOrderNotesDto } from '../dto/update-order-notes.dto';
 import { UpdateOrderStatusDto } from '../dto/update-order-status.dto';
 import { StoreOrdersService } from './orders.service';
 
-@ApiTags('Store - Orders')
+@ApiTags('Store - Orders & Checkout')
 @ApiBearerAuth('bearer')
-@Controller()
+@UseGuards(AuthGuard)
+@Controller('store/orders')
 export class StoreOrdersController {
   constructor(private readonly ordersService: StoreOrdersService) {}
 
-  @Post('orders')
+  @Post()
   @Roles('CUSTOMER')
-  @ApiOperation({ summary: 'Create order from cart (customer only)' })
-  createOrder(@Body() dto: CreateOrderDto, @Req() req?: { user?: { id: string; role: string } }) {
-    return this.ordersService.createOrderFromCart(dto, req?.user);
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary:
+      'Proceed to order from cart (Customer only): creates ProductOrder, decrements inventory, creates invoice, and returns Stripe Checkout URL (or confirms COD)',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Order created and Stripe checkout session URL or COD confirmation returned',
+  })
+  createOrder(
+    @Body() dto: CreateOrderDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.ordersService.createOrderFromCart(dto, user);
   }
 
-  @Get('orders')
+  @Get('checkout/session/:orderId')
   @Roles('CUSTOMER')
-  @ApiOperation({ summary: 'Get own order history (customer only)' })
-  getOrders(@Query() query: OrderListQueryDto, @Req() req?: { user?: { id: string; role: string } }) {
-    return this.ordersService.getMyOrders(query, req?.user);
+  @ApiOperation({
+    summary:
+      'Retrieve or regenerate Stripe Checkout Session URL for a pending order',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Stripe checkout session URL returned',
+  })
+  getCheckoutSession(
+    @Param('orderId') orderId: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.ordersService.getCheckoutSession(orderId, user);
   }
 
-  @Get('orders/admin/list')
-  @Roles('ADMIN', 'STAFF')
-  @ApiOperation({ summary: 'Get full order list (admin/staff)' })
-  getAdminOrders(@Query() query: OrderListQueryDto, @Req() req?: { user?: { id: string; role: string } }) {
-    return this.ordersService.getAdminOrders(query, req?.user);
+  @Post('webhook/stripe')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Stripe Webhook handler for checkout.session.completed & payment confirmation',
+  })
+  handleStripeWebhook(
+    @Body() payload: any,
+    @Headers('stripe-signature') signature?: string,
+  ) {
+    return this.ordersService.handleStripeWebhook(payload, signature);
   }
 
-  @Get('orders/:id')
-  @Roles('ADMIN', 'STAFF', 'CUSTOMER')
-  @ApiOperation({ summary: 'Get order details (role-aware)' })
-  getOrderById(@Param('id') id: string, @Req() req?: { user?: { id: string; role: string } }) {
-    return this.ordersService.getOrderDetails(id, req?.user);
+  @Get()
+  @Roles('CUSTOMER', 'ADMIN')
+  @ApiOperation({ summary: 'Get own order history (Customer only)' })
+  @ApiResponse({ status: 200, description: 'List of own orders returned' })
+  getMyOrders(
+    @Query() query: OrderListQueryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.ordersService.getMyOrders(query, user);
   }
 
-  @Patch('orders/:id/cancel')
-  @Roles('ADMIN', 'STAFF', 'CUSTOMER')
-  @ApiOperation({ summary: 'Cancel order (customer/admin role-aware)' })
-  cancelOrder(@Param('id') id: string, @Req() req?: { user?: { id: string; role: string } }) {
-    return this.ordersService.cancelOrder(id, req?.user);
+  @Get('admin/list')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Get full platform order list with filters (Admin only)',
+  })
+  @ApiResponse({ status: 200, description: 'Admin order list returned' })
+  getAdminOrders(
+    @Query() query: OrderListQueryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.ordersService.getAdminOrders(query, user);
   }
 
-  @Patch('orders/:id/status')
-  @Roles('ADMIN', 'STAFF')
-  @ApiOperation({ summary: 'Update order status (admin/staff)' })
+  @Get(':id')
+  @Roles('CUSTOMER', 'ADMIN')
+  @ApiOperation({
+    summary:
+      'Get order details, items, delivery address, timeline, tracking, and invoice by ID or Business ID',
+  })
+  @ApiResponse({ status: 200, description: 'Order details returned' })
+  getOrderById(
+    @Param('id') id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.ordersService.getOrderDetails(id, user);
+  }
+
+  @Patch(':id/cancel')
+  @Roles('CUSTOMER', 'ADMIN')
+  @ApiOperation({
+    summary:
+      'Cancel order: sets status to CANCELLED, voids unpaid invoice, and automatically restores product inventory',
+  })
+  @ApiResponse({ status: 200, description: 'Order cancelled and inventory restored' })
+  cancelOrder(
+    @Param('id') id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.ordersService.cancelOrder(id, user);
+  }
+
+  @Patch(':id/status')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary:
+      'Unified Admin Update: update order status, carrier, tracking number, and add timeline notes in 1 call (Admin only)',
+  })
+  @ApiResponse({ status: 200, description: 'Order status updated successfully' })
   updateOrderStatus(
     @Param('id') id: string,
     @Body() dto: UpdateOrderStatusDto,
-    @Req() req?: { user?: { id: string; role: string } },
+    @CurrentUser() user: RequestUser,
   ) {
-    return this.ordersService.updateOrderStatus(id, dto, req?.user);
-  }
-
-  @Patch('orders/:id/notes')
-  @Roles('ADMIN', 'STAFF')
-  @ApiOperation({ summary: 'Update order notes (admin/staff)' })
-  updateOrderNotes(
-    @Param('id') id: string,
-    @Body() dto: UpdateOrderNotesDto,
-    @Req() req?: { user?: { id: string; role: string } },
-  ) {
-    return this.ordersService.updateOrderNotes(id, dto, req?.user);
+    return this.ordersService.updateOrderStatus(id, dto, user);
   }
 }
-

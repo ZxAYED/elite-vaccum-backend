@@ -1,0 +1,47 @@
+// ==========================================
+// 13. SYSTEM, CONTACT & SETTINGS
+// ==========================================
+
+model ContactSubmission {
+  id            String   @id @default(uuid()) @db.Uuid
+  fullName      String   @map("full_name") @db.VarChar(150)
+  email         String   @db.VarChar(255)
+  phone         String   @db.VarChar(30)
+  category      String   @db.VarChar(100)
+  message       String   @db.Text
+  status        String   @default("NEW") @db.VarChar(50) // NEW, IN_REVIEW, RESOLVED
+  responseNotes String?  @map("response_notes") @db.Text
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([status, createdAt])
+  @@map("contact_submissions")
+}
+
+model FileUpload {
+  id         String   @id @default(uuid()) @db.Uuid
+  key        String   @unique @db.VarChar(255)
+  fileName   String   @map("file_name") @db.VarChar(255)
+  fileType   String   @map("file_type") @db.VarChar(100)
+  sizeBytes  Int      @map("size_bytes")
+  url        String   @db.VarChar(500)
+  provider   String   @default("S3") @db.VarChar(50)
+  purpose    String   @db.VarChar(100) // PRODUCT_IMAGE, SERVICE_ATTACHMENT, REPORT_EVIDENCE
+  uploaderId String?  @map("uploader_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([purpose])
+  @@map("file_uploads")
+}
+
+model AdminSetting {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique @db.VarChar(100)
+  category    String   @db.VarChar(100) // GENERAL, NOTIFICATIONS, SYSTEM, LEGAL, CONTACT
+  value       Json
+  description String?  @db.Text
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([category])
+  @@map("admin_settings")
+}

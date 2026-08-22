@@ -1,193 +1,254 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ProductStatus, TaxMode } from '@prisma/client';
+import { ProductAvailability, ProductStatus } from '@prisma/client';
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
   IsEnum,
   IsInt,
+  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
-  IsUrl,
   IsUUID,
   MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { safeJsonParse } from 'src/common/utils/parseJsonPayload';
 
-export class ProductFeatureInputDto {
-  @ApiPropertyOptional({ example: 'shield-check' })
-  @IsOptional()
+export class ProductHighlightInputDto {
+  @ApiProperty({ example: 'Ultra-quiet 58 dB sound level' })
   @IsString()
-  iconKey?: string;
+  @IsNotEmpty()
+  @MaxLength(255)
+  readonly text!: string;
 
-  @ApiProperty({ example: '10-Year Comprehensive Warranty' })
-  @IsString()
-  value!: string;
-
-  @ApiPropertyOptional({ default: 0 })
+  @ApiPropertyOptional({ example: 0, default: 0 })
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
-  sortOrder?: number;
+  readonly sortOrder?: number;
+}
+
+export class ProductSpecificationInputDto {
+  @ApiProperty({ example: 'Motor' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  readonly label!: string;
+
+  @ApiProperty({ example: 'Dual-Stage Flow-Thru 120V' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(255)
+  readonly value!: string;
+
+  @ApiPropertyOptional({ example: 0, default: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  readonly sortOrder?: number;
+}
+
+export class ProductShippingNoteInputDto {
+  @ApiProperty({ example: 'Ships within 1-2 business days via FedEx Freight' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(255)
+  readonly text!: string;
+
+  @ApiPropertyOptional({ example: 0, default: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  readonly sortOrder?: number;
 }
 
 export class ProductImageInputDto {
-  @ApiProperty({ example: 'https://cdn.example.com/products/item-1.jpg' })
-  @IsUrl()
-  url!: string;
-
-  @ApiPropertyOptional({ example: 'Front view' })
+  @ApiPropertyOptional({ example: 'products/2026-08-22/image.jpg' })
   @IsOptional()
   @IsString()
-  altText?: string;
+  readonly key?: string;
+
+  @ApiProperty({
+    example: 'https://bucket.s3.amazonaws.com/products/image.jpg',
+  })
+  @IsString()
+  @IsNotEmpty()
+  readonly url!: string;
+
+  @ApiPropertyOptional({ example: 'Front main unit view' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  readonly alt?: string;
 
   @ApiPropertyOptional({ default: false })
   @IsOptional()
   @IsBoolean()
-  isPrimary?: boolean;
+  readonly isPrimary?: boolean;
 
   @ApiPropertyOptional({ default: 0 })
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
-  sortOrder?: number;
+  readonly sortOrder?: number;
 }
 
 export class CreateProductDto {
-  @ApiProperty({ example: 'Elite 500 Performance' })
-  @IsString()
-  @MaxLength(180)
-  name!: string;
-
-  @ApiProperty({ example: 'category-id' })
+  @ApiProperty({
+    example: 'c1234567-89ab-cdef-0123-456789abcdef',
+    description: 'Category UUID',
+  })
   @IsUUID()
-  categoryId!: string;
+  @IsNotEmpty()
+  readonly categoryId!: string;
 
-  @ApiProperty({ example: 'subcategory-id' })
-  @IsUUID()
-  subCategoryId!: string;
+  @ApiProperty({ example: 'Silent Master S900 Central Vacuum Power Unit' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  readonly name!: string;
 
-  @ApiPropertyOptional({ example: 'E500-PRO' })
+  @ApiPropertyOptional({ example: 'S900-PRO-ELITE' })
   @IsOptional()
   @IsString()
-  model?: string;
+  @MaxLength(100)
+  readonly model?: string;
 
-  @ApiPropertyOptional({ example: 'High-performance central vacuum unit' })
-  @IsOptional()
+  @ApiProperty({
+    example: 'Heavy-duty central vacuum designed for large residential homes.',
+  })
   @IsString()
-  shortDescription?: string;
+  @IsNotEmpty()
+  readonly summary!: string;
 
-  @ApiPropertyOptional({ example: 'Full rich description here...' })
-  @IsOptional()
+  @ApiProperty({
+    example: 'Full rich HTML or markdown description of the power unit...',
+  })
   @IsString()
-  description?: string;
+  @IsNotEmpty()
+  readonly description!: string;
 
-  @ApiProperty({ example: 899 })
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  price!: number;
-
-  @ApiPropertyOptional({ example: 0 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  shippingCost?: number;
-
-  @ApiPropertyOptional({ enum: TaxMode, default: TaxMode.TAXABLE })
-  @IsOptional()
-  @IsEnum(TaxMode)
-  taxable?: TaxMode;
-
-  @ApiPropertyOptional({ example: 8.5 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  taxRatePercent?: number;
-
-  @ApiPropertyOptional({ example: 20 })
+  @ApiPropertyOptional({ example: 10, default: 1 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)
-  stockQuantity?: number;
+  readonly quantity?: number = 1;
 
-  @ApiPropertyOptional({ example: 12.5 })
-  @IsOptional()
+  @ApiProperty({ example: 1299.99 })
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  shippingWeight?: number;
-
-  @ApiPropertyOptional({ example: 20.5 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  dimensionLength?: number;
-
-  @ApiPropertyOptional({ example: 10.2 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  dimensionWidth?: number;
-
-  @ApiPropertyOptional({ example: 8.1 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  dimensionHeight?: number;
-
-  @ApiPropertyOptional({ example: '10-year comprehensive warranty' })
-  @IsOptional()
-  @IsString()
-  warrantyInfo?: string;
-
-  @ApiPropertyOptional({ example: 'https://cdn.example.com/manuals/elite-500.pdf' })
-  @IsOptional()
-  @IsUrl()
-  manualPdfUrl?: string;
-
-  @ApiPropertyOptional({ type: [String], example: ['hepa', 'quiet'] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  tags?: string[];
-
-  @ApiPropertyOptional({ type: [String], example: ['120V', 'Dual-stage motor'] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  specifications?: string[];
+  readonly priceUsd!: number;
 
   @ApiPropertyOptional({ enum: ProductStatus, default: ProductStatus.ACTIVE })
   @IsOptional()
   @IsEnum(ProductStatus)
-  status?: ProductStatus;
+  readonly status?: ProductStatus = ProductStatus.ACTIVE;
 
-  @ApiPropertyOptional({ default: true })
+  @ApiPropertyOptional({
+    enum: ProductAvailability,
+    default: ProductAvailability.IN_STOCK,
+  })
   @IsOptional()
+  @IsEnum(ProductAvailability)
+  readonly availability?: ProductAvailability = ProductAvailability.IN_STOCK;
+
+  @ApiPropertyOptional({ example: true, default: true })
+  @IsOptional()
+  @Transform(
+    ({ value }) =>
+      value === 'true' || value === true || value === 1 || value === '1',
+  )
   @IsBoolean()
-  isActive?: boolean;
+  readonly taxable?: boolean = true;
 
-  @ApiPropertyOptional({ type: [ProductImageInputDto] })
+  @ApiPropertyOptional({ example: 'Free Standard Shipping' })
   @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  readonly shippingLabel?: string;
+
+  @ApiPropertyOptional({ example: 10, default: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  readonly popularityRank?: number = 0;
+
+  @ApiPropertyOptional({ example: 'Silent Master S900 Unit' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  readonly imageAlt?: string;
+
+  @ApiPropertyOptional({
+    type: [ProductHighlightInputDto],
+    description:
+      'Product highlights / bullet points. Can be JSON stringified when sent via multipart form-data.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    const parsed = safeJsonParse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) =>
+        typeof item === 'string' ? { text: item } : item,
+      );
+    }
+    return parsed;
+  })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductHighlightInputDto)
+  readonly highlights?: ProductHighlightInputDto[];
+
+  @ApiPropertyOptional({
+    type: [ProductSpecificationInputDto],
+    description:
+      'Product specifications. Can be JSON stringified when sent via multipart form-data.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => safeJsonParse(value))
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductSpecificationInputDto)
+  readonly specifications?: ProductSpecificationInputDto[];
+
+  @ApiPropertyOptional({
+    type: [ProductShippingNoteInputDto],
+    description:
+      'Shipping notes. Can be JSON stringified when sent via multipart form-data.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    const parsed = safeJsonParse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) =>
+        typeof item === 'string' ? { text: item } : item,
+      );
+    }
+    return parsed;
+  })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductShippingNoteInputDto)
+  readonly shippingNotes?: ProductShippingNoteInputDto[];
+
+  @ApiPropertyOptional({
+    type: [ProductImageInputDto],
+    description: 'Existing image URLs or metadata. Can be JSON stringified.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => safeJsonParse(value))
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ProductImageInputDto)
-  images?: ProductImageInputDto[];
-
-  @ApiPropertyOptional({ type: [ProductFeatureInputDto] })
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => ProductFeatureInputDto)
-  features?: ProductFeatureInputDto[];
+  readonly images?: ProductImageInputDto[];
 }
-

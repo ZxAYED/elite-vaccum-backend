@@ -1,0 +1,99 @@
+// ==========================================
+// 8. TECHNICIANS & FIELD EXECUTION
+// ==========================================
+
+model Technician {
+  id                  String           @id @default(uuid()) @db.Uuid
+  userId              String           @unique @map("user_id") @db.Uuid
+  displayName         String           @map("display_name") @db.VarChar(150)
+  email               String           @db.VarChar(255)
+  phone               String           @db.VarChar(30)
+  status              TechnicianStatus @default(ACTIVE)
+  rating              Decimal          @default(5.00) @db.Decimal(3, 2)
+  completedJobs       Int              @default(0) @map("completed_jobs")
+  isVerified          Boolean          @default(true) @map("is_verified")
+  specializations     String[]         @default([])
+  defaultAvailability Json?            @map("default_availability")
+  adminNotes          String?          @map("admin_notes") @db.Text
+  createdAt           DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime         @updatedAt @map("updated_at") @db.Timestamptz
+
+  user             User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedRequests ServiceRequest[]          @relation("TechnicianServiceRequests")
+  assignedJobs     ServiceOrder[]            @relation("TechnicianAssignedJobs")
+  appointments     Appointment[]
+  serviceReports   TechnicianServiceReport[]
+  etas             TechnicianEta[]
+
+  @@index([status])
+  @@map("technicians")
+}
+
+model TechnicianEta {
+  id             String   @id @default(uuid()) @db.Uuid
+  serviceOrderId String   @map("service_order_id") @db.Uuid
+  technicianId   String   @map("technician_id") @db.Uuid
+  minutes        Int
+  updatedBy      String   @map("updated_by") @db.VarChar(100)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  technician   Technician   @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+
+  @@index([serviceOrderId])
+  @@map("technician_etas")
+}
+
+model TechnicianServiceReport {
+  id                String    @id @default(uuid()) @db.Uuid
+  serviceOrderId    String    @unique @map("service_order_id") @db.Uuid
+  technicianId      String    @map("technician_id") @db.Uuid
+  diagnosisFindings String    @map("diagnosis_findings") @db.Text
+  workPerformed     String    @map("work_performed") @db.Text
+  technicianNotes   String?   @map("technician_notes") @db.Text
+  recommendations   String?   @db.Text
+  submittedAt       DateTime? @map("submitted_at") @db.Timestamptz
+  lockedAt          DateTime? @map("locked_at") @db.Timestamptz
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  serviceOrder ServiceOrder               @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  technician   Technician                 @relation(fields: [technicianId], references: [id], onDelete: Restrict)
+  partsUsed    TechnicianReportPart[]
+  evidence     TechnicianReportEvidence[]
+
+  @@map("technician_service_reports")
+}
+
+model TechnicianReportPart {
+  id        String   @id @default(uuid()) @db.Uuid
+  reportId  String   @map("report_id") @db.Uuid
+  name      String   @db.VarChar(200)
+  sku       String?  @db.VarChar(100)
+  quantity  Int      @default(1)
+  note      String?  @db.Text
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  report TechnicianServiceReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@map("technician_report_parts")
+}
+
+model TechnicianReportEvidence {
+  id         String           @id @default(uuid()) @db.Uuid
+  reportId   String           @map("report_id") @db.Uuid
+  stage      EvidenceStage
+  category   EvidenceCategory
+  fileName   String           @map("file_name") @db.VarChar(255)
+  fileType   String           @map("file_type") @db.VarChar(100)
+  sizeBytes  Int              @map("size_bytes")
+  url        String           @db.VarChar(500)
+  note       String?          @db.Text
+  uploadedAt DateTime         @default(now()) @map("uploaded_at") @db.Timestamptz
+
+  report TechnicianServiceReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId, stage])
+  @@map("technician_report_evidence")
+}

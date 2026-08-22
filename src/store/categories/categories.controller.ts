@@ -1,99 +1,102 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import {
+  CurrentUser,
+  RequestUser,
+} from 'src/common/decorator/currentUser.decorator';
 import { Public, Roles } from 'src/common/decorator/rolesDecorator';
+import { AuthGuard } from 'src/common/guards/auth/auth.guard';
+import { CategoryListQueryDto } from '../dto/category-list-query.dto';
 import { CreateCategoryDto } from '../dto/create-category.dto';
-import { CreateSubCategoryDto } from '../dto/create-subcategory.dto';
-import { ProductListQueryDto } from '../dto/product-list-query.dto';
 import { UpdateCategoryDto } from '../dto/update-category.dto';
-import { UpdateSubCategoryDto } from '../dto/update-subcategory.dto';
 import { StoreCategoriesService } from './categories.service';
 
 @ApiTags('Store - Categories')
 @ApiBearerAuth('bearer')
-@Controller()
+@UseGuards(AuthGuard)
+@Controller('categories')
 export class StoreCategoriesController {
   constructor(private readonly categoriesService: StoreCategoriesService) {}
 
-  @Post('categories')
-  @Roles('ADMIN', 'STAFF')
-  @ApiOperation({ summary: 'Create parent/child category (admin/staff)' })
-  createCategory(@Body() dto: CreateCategoryDto, @Req() req?: { user?: { id: string; role: string } }) {
-    return this.categoriesService.createCategory(dto, req?.user);
+  @Post()
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create a new product category (Admin only)' })
+  @ApiResponse({ status: 201, description: 'Category successfully created' })
+  @ApiResponse({ status: 409, description: 'Category slug already exists' })
+  createCategory(
+    @Body() dto: CreateCategoryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.categoriesService.createCategory(dto, user);
   }
 
-  @Get('categories')
+  @Get()
   @Public()
-  @ApiOperation({ summary: 'List categories (public active, admin all)' })
-  getCategories(@Req() req?: { user?: { id: string; role: string } }) {
-    return this.categoriesService.getCategories(req?.user);
+  @ApiOperation({
+    summary:
+      'List categories with active product counts, optional search, and pagination',
+  })
+  @ApiResponse({ status: 200, description: 'List of categories returned' })
+  getCategories(
+    @Query() query: CategoryListQueryDto,
+    @CurrentUser() user?: RequestUser,
+  ) {
+    return this.categoriesService.getCategories(query, user);
   }
 
-  @Get('categories/admin/tree')
-  @Roles('ADMIN', 'STAFF')
-  @ApiOperation({ summary: 'Admin category tree' })
-  getAdminTree(@Req() req?: { user?: { id: string; role: string } }) {
-    return this.categoriesService.getAdminCategoryTree(req?.user);
-  }
-
-  @Get('categories/:id')
+  @Get(':id')
   @Public()
-  @ApiOperation({ summary: 'Get category by id' })
-  getCategoryById(@Param('id') id: string, @Req() req?: { user?: { id: string; role: string } }) {
-    return this.categoriesService.getCategoryById(id, req?.user);
+  @ApiOperation({ summary: 'Get category details by UUID or unique slug' })
+  @ApiResponse({ status: 200, description: 'Category details returned' })
+  @ApiResponse({ status: 404, description: 'Category not found' })
+  getCategoryById(@Param('id') id: string, @CurrentUser() user?: RequestUser) {
+    return this.categoriesService.getCategoryById(id, user);
   }
 
-  @Patch('categories/:id')
-  @Roles('ADMIN', 'STAFF')
-  @ApiOperation({ summary: 'Update category' })
+  @Patch(':id')
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Update category details (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Category successfully updated' })
+  @ApiResponse({ status: 404, description: 'Category not found' })
+  @ApiResponse({ status: 409, description: 'Slug collision' })
   updateCategory(
     @Param('id') id: string,
     @Body() dto: UpdateCategoryDto,
-    @Req() req?: { user?: { id: string; role: string } },
+    @CurrentUser() user: RequestUser,
   ) {
-    return this.categoriesService.updateCategory(id, dto, req?.user);
+    return this.categoriesService.updateCategory(id, dto, user);
   }
 
-  @Delete('categories/:id')
-  @Roles('ADMIN', 'STAFF')
-  @ApiOperation({ summary: 'Delete/deactivate category safely' })
-  deleteCategory(@Param('id') id: string, @Req() req?: { user?: { id: string; role: string } }) {
-    return this.categoriesService.deleteCategory(id, req?.user);
-  }
-
-  @Post('subcategories')
-  @Roles('ADMIN', 'STAFF')
-  @ApiOperation({ summary: 'Create subcategory (admin/staff)' })
-  createSubCategory(@Body() dto: CreateSubCategoryDto, @Req() req?: { user?: { id: string; role: string } }) {
-    return this.categoriesService.createSubCategory(dto, req?.user);
-  }
-
-  @Patch('subcategories/:id')
-  @Roles('ADMIN', 'STAFF')
-  @ApiOperation({ summary: 'Update subcategory' })
-  updateSubCategory(
-    @Param('id') id: string,
-    @Body() dto: UpdateSubCategoryDto,
-    @Req() req?: { user?: { id: string; role: string } },
-  ) {
-    return this.categoriesService.updateSubCategory(id, dto, req?.user);
-  }
-
-  @Delete('subcategories/:id')
-  @Roles('ADMIN', 'STAFF')
-  @ApiOperation({ summary: 'Delete/deactivate subcategory safely' })
-  deleteSubCategory(@Param('id') id: string, @Req() req?: { user?: { id: string; role: string } }) {
-    return this.categoriesService.deleteSubCategory(id, req?.user);
-  }
-
-  @Get('categories/:id/products')
-  @Public()
-  @ApiOperation({ summary: 'List products under category' })
-  getCategoryProducts(
-    @Param('id') id: string,
-    @Query() query: ProductListQueryDto,
-    @Req() req?: { user?: { id: string; role: string } },
-  ) {
-    return this.categoriesService.getCategoryProducts(id, query, req?.user);
+  @Delete(':id')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Delete category if no products are associated (Admin only)',
+  })
+  @ApiResponse({ status: 200, description: 'Category successfully deleted' })
+  @ApiResponse({
+    status: 409,
+    description: 'Category contains active products',
+  })
+  deleteCategory(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.categoriesService.deleteCategory(id, user);
   }
 }
-

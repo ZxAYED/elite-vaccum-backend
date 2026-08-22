@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { GeminiProvider } from './providers/gemini.provider';
-import { serviceIntakeJsonSchema, ServiceIntakeResult, ServiceIntakeSchema } from './schema/service-intake.schema';
+import {
+  serviceIntakeJsonSchema,
+  ServiceIntakeResult,
+  ServiceIntakeSchema,
+} from './schema/service-intake.schema';
 
 @Injectable()
 export class AiService {
-  constructor(private readonly geminiProvider: GeminiProvider) { }
+  constructor(private readonly geminiProvider: GeminiProvider) {}
 
   async chat(message: string) {
     const response = await this.geminiProvider.generateText(message);
@@ -14,9 +18,7 @@ export class AiService {
       provider: 'gemini',
     };
   }
-  async analyzeServiceIntake(
-    message: string,
-  ): Promise<ServiceIntakeResult> {
+  async analyzeServiceIntake(message: string): Promise<ServiceIntakeResult> {
     const prompt = `
 You are a service intake assistant for Elite Central Vacuum.
 
@@ -37,11 +39,10 @@ Customer message:
 ${message}
 `;
 
-    const rawResult =
-      await this.geminiProvider.generateStructured<unknown>({
-        input: prompt,
-        schema: serviceIntakeJsonSchema,
-      });
+    const rawResult = await this.geminiProvider.generateStructured<unknown>({
+      input: prompt,
+      schema: serviceIntakeJsonSchema,
+    });
 
     return ServiceIntakeSchema.parse(rawResult);
   }

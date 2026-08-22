@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
-import { StoreInvoicePdfService } from './store-invoice-pdf.service';
+import { StoreAddressesController } from './addresses/addresses.controller';
+import { StoreAddressesService } from './addresses/addresses.service';
 import { StoreCartController } from './cart/cart.controller';
 import { StoreCartService } from './cart/cart.service';
 import { StoreCategoriesController } from './categories/categories.controller';
@@ -12,8 +13,7 @@ import { StoreProductsController } from './products/products.controller';
 import { StoreProductsService } from './products/products.service';
 import { StoreReturnsController } from './returns/returns.controller';
 import { StoreReturnsService } from './returns/returns.service';
-import { StoreShipmentController } from './shipment/shipment.controller';
-import { StoreShipmentService } from './shipment/shipment.service';
+import { StoreInvoicePdfService } from './store-invoice-pdf.service';
 
 @Module({
   controllers: [
@@ -21,7 +21,7 @@ import { StoreShipmentService } from './shipment/shipment.service';
     StoreProductsController,
     StoreCartController,
     StoreOrdersController,
-    StoreShipmentController,
+    StoreAddressesController,
     StoreInvoiceController,
     StoreReturnsController,
   ],
@@ -31,7 +31,7 @@ import { StoreShipmentService } from './shipment/shipment.service';
     StoreProductsService,
     StoreCartService,
     StoreOrdersService,
-    StoreShipmentService,
+    StoreAddressesService,
     StoreInvoiceService,
     StoreReturnsService,
   ],

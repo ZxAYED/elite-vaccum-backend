@@ -1,141 +1,173 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Role } from '@prisma/client';
-import { AuditLogService } from 'src/notifications/audit-log.service';
-import { NotificationsService } from 'src/notifications/notifications.service';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  InvoiceStatus,
+  Prisma,
+  UserRole,
+} from '@prisma/client';
+import { RequestUser } from 'src/common/decorator/currentUser.decorator';
+import { generateBusinessId } from 'src/common/utils/business-id.util';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { GenerateInvoiceDto } from '../dto/generate-invoice.dto';
 import { StoreInvoicePdfService } from '../store-invoice-pdf.service';
-
-type Actor = { id: string; role: string };
 
 @Injectable()
 export class StoreInvoiceService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly notificationsService: NotificationsService,
-    private readonly auditLogService: AuditLogService,
     private readonly storeInvoicePdfService: StoreInvoicePdfService,
   ) {}
 
-  private isAdmin(actor?: Actor) {
-    return actor?.role === Role.ADMIN || actor?.role === Role.STAFF;
+  private isAdmin(user?: RequestUser | null) {
+    return user?.role === UserRole.ADMIN;
   }
 
-  private ensureCanAccessOrder(actor: Actor | undefined, customerId: string) {
-    if (!actor) throw new ForbiddenException('Unauthorized');
-    if (!this.isAdmin(actor) && actor.id !== customerId) {
-      throw new ForbiddenException('You can only access your own orders');
+  private isUuid(id: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      id,
+    );
+  }
+
+  async getInvoiceByOrderId(orderId: string, user?: RequestUser | null) {
+    const isUuid = this.isUuid(orderId);
+
+    const order = await this.prisma.productOrder.findFirst({
+      where: isUuid ? { id: orderId } : { businessId: orderId },
+      include: {
+        customer: true,
+        invoices: {
+          include: {
+            lineItems: { orderBy: { sortOrder: 'asc' } },
+            payments: true,
+          },
+        },
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException(`Order '${orderId}' not found`);
     }
+
+    if (!this.isAdmin(user) && (!user || user.id !== order.customer.userId)) {
+      throw new ForbiddenException('You do not have permission to access this invoice');
+    }
+
+    const invoice = order.invoices[0];
+    if (!invoice) {
+      throw new NotFoundException(`No invoice found for order '${order.businessId}'`);
+    }
+
+    return {
+      orderId: order.id,
+      orderBusinessId: order.businessId,
+      invoice,
+    };
   }
 
-  private async generateInvoiceNumber() {
-    const prefix = `INV-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
-    for (let i = 0; i < 20; i++) {
-      const suffix = Math.floor(100000 + Math.random() * 900000);
-      const invoiceNumber = `${prefix}-${suffix}`;
-      const found = await this.prisma.storeInvoice.findUnique({
-        where: { invoiceNumber },
-        select: { id: true },
+  async generateInvoicePdf(
+    orderId: string,
+    dto: GenerateInvoiceDto,
+    user?: RequestUser | null,
+  ) {
+    const isUuid = this.isUuid(orderId);
+
+    const order = await this.prisma.productOrder.findFirst({
+      where: isUuid ? { id: orderId } : { businessId: orderId },
+      include: {
+        customer: true,
+        items: true,
+        invoices: {
+          include: {
+            lineItems: { orderBy: { sortOrder: 'asc' } },
+          },
+        },
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException(`Order '${orderId}' not found`);
+    }
+
+    if (!this.isAdmin(user) && (!user || user.id !== order.customer.userId)) {
+      throw new ForbiddenException('You do not have permission to generate this invoice');
+    }
+
+    let invoice = order.invoices[0];
+
+    if (!invoice) {
+      const businessId = await generateBusinessId('INV', async (id) => {
+        const exists = await this.prisma.invoice.findUnique({
+          where: { businessId: id },
+          select: { id: true },
+        });
+        return !!exists;
       });
-      if (!found) return invoiceNumber;
-    }
-    throw new BadRequestException('Unable to generate invoice number');
-  }
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + 7);
 
-  generateInvoice(orderId: string, dto: GenerateInvoiceDto, actor?: Actor) {
-    return (async () => {
-      const order = await this.prisma.storeOrder.findUnique({
-        where: { id: orderId },
+      invoice = await this.prisma.invoice.create({
+        data: {
+          businessId,
+          customerId: order.customerId,
+          productOrderId: order.id,
+          status: InvoiceStatus.ISSUED,
+          dueDate,
+          subtotalUsd: order.subtotalUsd,
+          taxUsd: order.taxUsd,
+          discountUsd: order.discountUsd,
+          totalUsd: order.totalUsd,
+          notes: 'Order Invoice',
+          lineItems: {
+            create: order.items.map((item, idx) => ({
+              description: `${item.productName} (SKU: ${item.productSku || 'N/A'})`,
+              quantity: item.quantity,
+              unitPriceUsd: item.unitPriceUsd,
+              totalUsd: item.totalUsd,
+              sortOrder: idx,
+            })),
+          },
+        },
         include: {
-          customer: { select: { id: true, fullName: true, email: true } },
-          items: true,
-          invoice: true,
+          lineItems: { orderBy: { sortOrder: 'asc' } },
         },
       });
-      if (!order) throw new NotFoundException('Order not found');
-      this.ensureCanAccessOrder(actor, order.customerId);
+    }
 
-      if (order.invoice && !dto.regenerate) {
-        return {
-          id: order.invoice.id,
-          invoiceNumber: order.invoice.invoiceNumber,
-          pdfUrl: order.invoice.pdfUrl,
-          issuedAt: order.invoice.issuedAt,
-        };
-      }
+    const pdf = await this.storeInvoicePdfService.generateInvoicePdf(order.id, {
+      invoiceNumber: invoice.businessId,
+      orderNumber: order.businessId,
+      customerName: order.customer.displayName,
+      customerEmail: order.customer.email,
+      issuedAt: invoice.issueDate,
+      shippingAddress: (order.shippingAddress as Record<string, unknown>) ?? null,
+      billingAddress: (order.shippingAddress as Record<string, unknown>) ?? null,
+      items: order.items.map((item) => ({
+        productName: item.productName,
+        sku: item.productSku,
+        quantity: item.quantity,
+        unitPrice: Number(item.unitPriceUsd),
+        lineTotal: Number(item.totalUsd),
+      })),
+      subtotalAmount: Number(order.subtotalUsd),
+      shippingAmount: Number(order.shippingFeeUsd),
+      taxAmount: Number(order.taxUsd),
+      discountAmount: Number(order.discountUsd),
+      totalAmount: Number(order.totalUsd),
+    });
 
-      const invoiceNumber = order.invoice?.invoiceNumber ?? (await this.generateInvoiceNumber());
-      const issuedAt = new Date();
-      const pdf = await this.storeInvoicePdfService.generateInvoicePdf(order.id, {
-        invoiceNumber,
-        orderNumber: order.orderNumber,
-        customerName: order.customer.fullName,
-        customerEmail: order.customer.email,
-        issuedAt,
-        shippingAddress: (order.shippingAddressSnapshot as Record<string, unknown>) ?? null,
-        billingAddress: (order.billingAddressSnapshot as Record<string, unknown>) ?? null,
-        items: order.items.map((item) => ({
-          productName: item.productName,
-          sku: item.sku,
-          quantity: item.quantity,
-          unitPrice: Number(item.unitPrice),
-          lineTotal: Number(item.lineTotal),
-        })),
-        subtotalAmount: Number(order.subtotalAmount),
-        shippingAmount: Number(order.shippingAmount),
-        taxAmount: Number(order.taxAmount),
-        discountAmount: Number(order.discountAmount),
-        totalAmount: Number(order.totalAmount),
-      });
-
-      const saved = order.invoice
-        ? await this.prisma.storeInvoice.update({
-            where: { storeOrderId: order.id },
-            data: { pdfUrl: pdf.filePath, issuedAt },
-          })
-        : await this.prisma.storeInvoice.create({
-            data: {
-              storeOrderId: order.id,
-              invoiceNumber,
-              pdfUrl: pdf.filePath,
-              issuedAt,
-            },
-          });
-
-      await this.auditLogService.log({
-        actionType: 'STORE_INVOICE_GENERATED',
-        entityType: 'STORE_INVOICE',
-        entityId: saved.id,
-        userId: actor?.id,
-        metadata: { orderId: order.id, invoiceNumber: saved.invoiceNumber },
-      });
-      await this.notificationsService.notify({
-        userId: order.customer.id,
-        email: order.customer.email,
-        title: 'Invoice generated',
-        body: `Invoice ${saved.invoiceNumber} is ready for order ${order.orderNumber}.`,
-        referenceType: 'STORE_INVOICE',
-        referenceId: saved.id,
-      });
-      return {
-        id: saved.id,
-        invoiceNumber: saved.invoiceNumber,
-        pdfUrl: saved.pdfUrl,
-        issuedAt: saved.issuedAt,
-      };
-    })();
-  }
-
-  getInvoice(orderId: string, actor?: Actor) {
-    return (async () => {
-      const order = await this.prisma.storeOrder.findUnique({
-        where: { id: orderId },
-        include: { invoice: true },
-      });
-      if (!order) throw new NotFoundException('Order not found');
-      this.ensureCanAccessOrder(actor, order.customerId);
-      if (!order.invoice) throw new NotFoundException('Invoice not generated');
-      return order.invoice;
-    })();
+    return {
+      success: true,
+      invoiceId: invoice.id,
+      businessId: invoice.businessId,
+      issueDate: invoice.issueDate,
+      dueDate: invoice.dueDate,
+      totalUsd: Number(invoice.totalUsd),
+      pdfPath: pdf.filePath,
+      fileName: pdf.fileName,
+    };
   }
 }

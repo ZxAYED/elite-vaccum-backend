@@ -1,12 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, Min } from 'class-validator';
+import { IsInt, Max, Min } from 'class-validator';
 
 export class UpdateCartItemDto {
-  @ApiProperty({ example: 2 })
+  @ApiProperty({ example: 2, description: 'Updated quantity (1 - 100)' })
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  quantity!: number;
+  @Max(100)
+  readonly quantity!: number;
 }
-

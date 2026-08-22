@@ -29,7 +29,10 @@ type InvoicePayload = {
 @Injectable()
 export class StoreInvoicePdfService {
   private esc(text: string) {
-    return text.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+    return text
+      .replace(/\\/g, '\\\\')
+      .replace(/\(/g, '\\(')
+      .replace(/\)/g, '\\)');
   }
 
   private buildMinimalPdf(lines: string[]) {
@@ -47,8 +50,12 @@ export class StoreInvoicePdfService {
     objects.push(
       '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj',
     );
-    objects.push('4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj');
-    objects.push(`5 0 obj << /Length ${Buffer.byteLength(stream, 'utf8')} >> stream\n${stream}\nendstream endobj`);
+    objects.push(
+      '4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
+    );
+    objects.push(
+      `5 0 obj << /Length ${Buffer.byteLength(stream, 'utf8')} >> stream\n${stream}\nendstream endobj`,
+    );
 
     let pdf = '%PDF-1.4\n';
     const xref: number[] = [0];
@@ -89,8 +96,12 @@ export class StoreInvoicePdfService {
     lines.push(`Discount: ${payload.discountAmount.toFixed(2)}`);
     lines.push(`Total: ${payload.totalAmount.toFixed(2)}`);
     lines.push('');
-    lines.push(`Shipping Address: ${JSON.stringify(payload.shippingAddress ?? {})}`);
-    lines.push(`Billing Address: ${JSON.stringify(payload.billingAddress ?? {})}`);
+    lines.push(
+      `Shipping Address: ${JSON.stringify(payload.shippingAddress ?? {})}`,
+    );
+    lines.push(
+      `Billing Address: ${JSON.stringify(payload.billingAddress ?? {})}`,
+    );
 
     const buffer = this.buildMinimalPdf(lines);
     const dir = path.join(process.cwd(), 'storage', 'invoices');
@@ -101,4 +112,3 @@ export class StoreInvoicePdfService {
     return { filePath, fileName };
   }
 }
-

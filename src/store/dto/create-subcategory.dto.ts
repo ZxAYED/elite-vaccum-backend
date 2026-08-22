@@ -1,5 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export class CreateSubCategoryDto {
   @ApiProperty({ example: 'Power Units' })
@@ -27,4 +35,3 @@ export class CreateSubCategoryDto {
   @Min(0)
   sortOrder?: number;
 }
-

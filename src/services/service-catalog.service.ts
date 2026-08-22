@@ -69,8 +69,9 @@ export class ServiceCatalogService {
       skip: pagination.skip,
       take: pagination.take,
       orderBy: {
-        [params.sortBy ?? 'createdAt']:
-          isAdmin ? params.sortOrder ?? 'desc' : 'desc',
+        [params.sortBy ?? 'createdAt']: isAdmin
+          ? (params.sortOrder ?? 'desc')
+          : 'desc',
       },
     });
 
@@ -155,7 +156,9 @@ export class ServiceCatalogService {
       throw new ForbiddenException('Only admin can update services');
     }
 
-    const existing = await this.prisma.serviceType.findUnique({ where: { id } });
+    const existing = await this.prisma.serviceType.findUnique({
+      where: { id },
+    });
     if (!existing) {
       throw new NotFoundException('Service not found');
     }
@@ -163,10 +166,14 @@ export class ServiceCatalogService {
     return this.prisma.serviceType.update({
       where: { id },
       data: {
-        ...(dto.serviceCategoryId ? { serviceCategoryId: dto.serviceCategoryId } : {}),
+        ...(dto.serviceCategoryId
+          ? { serviceCategoryId: dto.serviceCategoryId }
+          : {}),
         ...(dto.name ? { name: dto.name.trim() } : {}),
         ...(dto.slug ? { slug: this.slugify(dto.slug) } : {}),
-        ...(dto.description !== undefined ? { description: dto.description } : {}),
+        ...(dto.description !== undefined
+          ? { description: dto.description }
+          : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
         ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
       },
@@ -179,7 +186,9 @@ export class ServiceCatalogService {
       throw new ForbiddenException('Only admin can delete services');
     }
 
-    const existing = await this.prisma.serviceType.findUnique({ where: { id } });
+    const existing = await this.prisma.serviceType.findUnique({
+      where: { id },
+    });
     if (!existing) {
       throw new NotFoundException('Service not found');
     }

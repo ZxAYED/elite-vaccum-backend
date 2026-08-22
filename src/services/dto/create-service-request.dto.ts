@@ -2,7 +2,10 @@
 import { IsDateString, IsOptional, IsString } from 'class-validator';
 
 export class CreateServiceRequestDto {
-  @ApiProperty({ example: 'service-type-id', description: 'Requested service ID (maps to service type)' })
+  @ApiProperty({
+    example: 'service-type-id',
+    description: 'Requested service ID (maps to service type)',
+  })
   @IsString()
   serviceId!: string;
 

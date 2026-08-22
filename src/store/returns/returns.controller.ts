@@ -1,76 +1,79 @@
-import { Body, Controller, Get, Param, Patch, Post, Req } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import {
+  CurrentUser,
+  RequestUser,
+} from 'src/common/decorator/currentUser.decorator';
 import { Roles } from 'src/common/decorator/rolesDecorator';
+import { AuthGuard } from 'src/common/guards/auth/auth.guard';
 import { AdminReturnNoteDto } from '../dto/admin-return-note.dto';
 import { CreateReturnRequestDto } from '../dto/create-return-request.dto';
 import { StoreReturnsService } from './returns.service';
 
-@ApiTags('Store - Returns')
+@ApiTags('Store - Returns & Refunds')
 @ApiBearerAuth('bearer')
-@Controller()
+@UseGuards(AuthGuard)
+@Controller('store/returns')
 export class StoreReturnsController {
   constructor(private readonly returnsService: StoreReturnsService) {}
 
-  @Post('orders/:id/return-requests')
+  @Post('orders/:orderId')
   @Roles('CUSTOMER')
-  @ApiOperation({ summary: 'Create return/refund request (customer)' })
+  @ApiOperation({
+    summary:
+      'Submit a return/refund request for a delivered order (Customer only)',
+  })
+  @ApiResponse({ status: 201, description: 'Return request submitted successfully' })
   createReturnRequest(
-    @Param('id') id: string,
+    @Param('orderId') orderId: string,
     @Body() dto: CreateReturnRequestDto,
-    @Req() req?: { user?: { id: string; role: string } },
+    @CurrentUser() user?: RequestUser,
   ) {
-    return this.returnsService.createReturnRequest(id, dto, req?.user);
+    return this.returnsService.createReturnRequest(orderId, dto, user);
   }
 
-  @Get('orders/:id/return-requests')
-  @Roles('ADMIN', 'STAFF', 'CUSTOMER')
-  @ApiOperation({ summary: 'List return requests by order' })
-  listReturnRequests(@Param('id') id: string, @Req() req?: { user?: { id: string; role: string } }) {
-    return this.returnsService.listReturnRequests(id, req?.user);
+  @Get('orders/:orderId')
+  @Roles('CUSTOMER', 'ADMIN')
+  @ApiOperation({
+    summary:
+      'Get return status and timeline history for an order',
+  })
+  @ApiResponse({ status: 200, description: 'Return request status returned' })
+  getReturnStatus(
+    @Param('orderId') orderId: string,
+    @CurrentUser() user?: RequestUser,
+  ) {
+    return this.returnsService.getReturnStatus(orderId, user);
   }
 
-  @Patch('return-requests/:id/approve')
-  @Roles('ADMIN', 'STAFF')
-  @ApiOperation({ summary: 'Approve return request' })
-  approveReturnRequest(
-    @Param('id') id: string,
+  @Patch('orders/:orderId/refund')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary:
+      'Approve return & mark order as REFUNDED (automatically restores product inventory stock) (Admin only)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Order refunded and inventory restored',
+  })
+  processReturnRefund(
+    @Param('orderId') orderId: string,
     @Body() dto: AdminReturnNoteDto,
-    @Req() req?: { user?: { id: string; role: string } },
+    @CurrentUser() user: RequestUser,
   ) {
-    return this.returnsService.approveReturnRequest(id, dto, req?.user);
-  }
-
-  @Patch('return-requests/:id/reject')
-  @Roles('ADMIN', 'STAFF')
-  @ApiOperation({ summary: 'Reject return request' })
-  rejectReturnRequest(
-    @Param('id') id: string,
-    @Body() dto: AdminReturnNoteDto,
-    @Req() req?: { user?: { id: string; role: string } },
-  ) {
-    return this.returnsService.rejectReturnRequest(id, dto, req?.user);
-  }
-
-  @Patch('return-requests/:id/receive')
-  @Roles('ADMIN', 'STAFF')
-  @ApiOperation({ summary: 'Mark returned item as received' })
-  receiveReturnRequest(
-    @Param('id') id: string,
-    @Body() dto: AdminReturnNoteDto,
-    @Req() req?: { user?: { id: string; role: string } },
-  ) {
-    return this.returnsService.receiveReturnRequest(id, dto, req?.user);
-  }
-
-  @Patch('return-requests/:id/refund')
-  @Roles('ADMIN', 'STAFF')
-  @ApiOperation({ summary: 'Mark return request as refunded (status only)' })
-  refundReturnRequest(
-    @Param('id') id: string,
-    @Body() dto: AdminReturnNoteDto,
-    @Req() req?: { user?: { id: string; role: string } },
-  ) {
-    return this.returnsService.refundReturnRequest(id, dto, req?.user);
+    return this.returnsService.processReturnRefund(orderId, dto, user);
   }
 }
-

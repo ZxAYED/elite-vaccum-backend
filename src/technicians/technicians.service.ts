@@ -14,7 +14,10 @@ import { UpdateTechnicianDto } from './dto/update-technician.dto';
 export class TechniciansService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private async ensureUniqueTechnicianEmail(email: string, excludeUserId?: string) {
+  private async ensureUniqueTechnicianEmail(
+    email: string,
+    excludeUserId?: string,
+  ) {
     const existing = await this.prisma.user.findUnique({
       where: { email: email.toLowerCase() },
       select: { id: true, role: true },
@@ -207,7 +210,10 @@ export class TechniciansService {
     } = updateTechnicianDto;
 
     if (email) {
-      await this.ensureUniqueTechnicianEmail(email.trim().toLowerCase(), existing.user.id);
+      await this.ensureUniqueTechnicianEmail(
+        email.trim().toLowerCase(),
+        existing.user.id,
+      );
     }
 
     return this.prisma.technicianProfile.update({

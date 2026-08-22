@@ -26,7 +26,10 @@ export class CreateTechnicianDto {
   @MaxLength(30)
   phone?: string;
 
-  @ApiPropertyOptional({ type: [String], example: ['Central Vacuum', 'Inlet Repair'] })
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['Central Vacuum', 'Inlet Repair'],
+  })
   @IsArray()
   @IsString({ each: true })
   @IsOptional()

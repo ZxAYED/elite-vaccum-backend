@@ -1,4 +1,8 @@
-import { EmailTemplateKey, type EmailTemplatePayload, type EmailTemplateRenderResult } from '../types/email.types';
+import {
+  EmailTemplateKey,
+  type EmailTemplatePayload,
+  type EmailTemplateRenderResult,
+} from '../types/email.types';
 
 function renderShell(title: string, body: string) {
   const logoUrl = 'https://i.imgur.com/GjvY4Z9.png';
@@ -110,7 +114,10 @@ export function renderEmailTemplate(
     default: {
       return {
         subject: 'Notification',
-        html: renderShell('Notification', '<p>You have a new notification.</p>'),
+        html: renderShell(
+          'Notification',
+          '<p>You have a new notification.</p>',
+        ),
       };
     }
   }

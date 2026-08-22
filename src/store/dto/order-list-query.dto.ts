@@ -1,46 +1,72 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { StoreOrderStatus } from '@prisma/client';
+import { ProductOrderStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsDateString, IsEnum, IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import {
+  IsDateString,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Min,
+} from 'class-validator';
 
 export class OrderListQueryDto {
-  @ApiPropertyOptional({ default: 1 })
+  @ApiPropertyOptional({ example: 1, default: 1 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  page?: number;
+  readonly page?: number = 1;
 
-  @ApiPropertyOptional({ default: 10 })
+  @ApiPropertyOptional({ example: 10, default: 10 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  limit?: number;
+  readonly limit?: number = 10;
 
-  @ApiPropertyOptional({ enum: StoreOrderStatus })
+  @ApiPropertyOptional({
+    enum: ProductOrderStatus,
+    description: 'Filter by order status',
+  })
   @IsOptional()
-  @IsEnum(StoreOrderStatus)
-  status?: StoreOrderStatus;
+  @IsEnum(ProductOrderStatus)
+  readonly status?: ProductOrderStatus;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    example: 'ORD-20260822',
+    description: 'Search by Order business ID, tracking number, or customer name',
+  })
   @IsOptional()
   @IsString()
-  orderNumber?: string;
+  readonly search?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    example: 'd92c7fa8-8924-4f01-a7eb-6237c569ef81',
+    description: 'Filter by specific customer UUID (Admin only)',
+  })
   @IsOptional()
   @IsUUID()
-  customerId?: string;
+  readonly customerId?: string;
 
-  @ApiPropertyOptional({ example: '2026-04-01T00:00:00.000Z' })
+  @ApiPropertyOptional({ example: '2026-08-01T00:00:00.000Z' })
   @IsOptional()
   @IsDateString()
-  dateFrom?: string;
+  readonly dateFrom?: string;
 
-  @ApiPropertyOptional({ example: '2026-04-30T23:59:59.999Z' })
+  @ApiPropertyOptional({ example: '2026-08-31T23:59:59.999Z' })
   @IsOptional()
   @IsDateString()
-  dateTo?: string;
+  readonly dateTo?: string;
+
+  @ApiPropertyOptional({ example: 'placedAt', default: 'placedAt' })
+  @IsOptional()
+  @IsString()
+  readonly sortBy?: string = 'placedAt';
+
+  @ApiPropertyOptional({ example: 'desc', enum: ['asc', 'desc'], default: 'desc' })
+  @IsOptional()
+  @IsEnum(['asc', 'desc'])
+  readonly sortOrder?: 'asc' | 'desc' = 'desc';
 }
-

@@ -12,7 +12,9 @@ export async function sendVerificationEmail(
   const smtpHost =
     configService.get<string>('AWS_SES_SMTP_HOST') ??
     'email-smtp.ap-south-1.amazonaws.com';
-  const smtpPort = Number(configService.get<string>('AWS_SES_SMTP_PORT') ?? 587);
+  const smtpPort = Number(
+    configService.get<string>('AWS_SES_SMTP_PORT') ?? 587,
+  );
   const smtpFrom = configService.get<string>('AWS_SES_FROM_EMAIL') ?? smtpUser;
 
   if (!smtpUser || !smtpPass || !smtpFrom || Number.isNaN(smtpPort)) {

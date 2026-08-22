@@ -48,7 +48,9 @@ export class ServiceSchedulesService {
     }
 
     if (request.status !== ServiceRequestStatus.QUOTATION_ACCEPTED) {
-      throw new BadRequestException('Service can be scheduled only after quotation acceptance');
+      throw new BadRequestException(
+        'Service can be scheduled only after quotation acceptance',
+      );
     }
 
     const scheduledStart = new Date(dto.scheduledDate);
@@ -147,7 +149,9 @@ export class ServiceSchedulesService {
     const updated = await this.prisma.serviceSchedule.update({
       where: { id },
       data: {
-        ...(dto.scheduledDate ? { scheduledStart: new Date(dto.scheduledDate) } : {}),
+        ...(dto.scheduledDate
+          ? { scheduledStart: new Date(dto.scheduledDate) }
+          : {}),
         ...(dto.reasonForReschedule
           ? { cancelReason: dto.reasonForReschedule }
           : {}),
@@ -208,11 +212,18 @@ export class ServiceSchedulesService {
     }
 
     if (schedule.serviceRequest.customerId !== actor.id) {
-      throw new ForbiddenException('You can only request reschedule for your own service');
+      throw new ForbiddenException(
+        'You can only request reschedule for your own service',
+      );
     }
 
-    if (schedule.status !== ScheduleStatus.SCHEDULED && schedule.status !== ScheduleStatus.RESCHEDULED) {
-      throw new BadRequestException('Reschedule can be requested only for scheduled services');
+    if (
+      schedule.status !== ScheduleStatus.SCHEDULED &&
+      schedule.status !== ScheduleStatus.RESCHEDULED
+    ) {
+      throw new BadRequestException(
+        'Reschedule can be requested only for scheduled services',
+      );
     }
 
     const isLastMinute =

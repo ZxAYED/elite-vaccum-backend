@@ -1,102 +1,92 @@
-enum Role {
+// ==========================================
+// 1. ENUMS
+// ==========================================
+
+enum UserRole {
   CUSTOMER
   TECHNICIAN
   ADMIN
-  STAFF
 }
 
-enum UserStatus {
+enum CustomerStatus {
   ACTIVE
   INACTIVE
-  BLOCKED
+  LEAD
+  SUSPENDED
 }
 
-enum AddressLabel {
-  HOME
-  WORK
+enum ContactMethod {
+  EMAIL
+  PHONE
+  CELLPHONE
+  SMS
+}
+
+enum PropertyType {
+  RESIDENTIAL_SINGLE_FAMILY
+  RESIDENTIAL_MULTI_FAMILY
+  COMMERCIAL
+  CONDO_APARTMENT
+  INDUSTRIAL
   OTHER
-  SERVICE
+}
+
+enum EquipmentStatus {
+  OPERATIONAL
+  NEEDS_SERVICE
+  OFFLINE
+  REPLACED
 }
 
 enum ProductStatus {
   DRAFT
   ACTIVE
-  INACTIVE
   ARCHIVED
 }
 
-enum TaxMode {
-  TAXABLE
-  NON_TAXABLE
+enum ProductAvailability {
+  IN_STOCK
+  LOW_STOCK
+  OUT_OF_STOCK
+  BACKORDER
+  DISCONTINUED
 }
 
-enum DiscountType {
-  PERCENTAGE
-  FIXED
+enum ServiceGroup {
+  SERVICE_AND_MAINTENANCE
+  INSTALLATION
 }
 
-enum StoreOrderStatus {
-  PENDING_PAYMENT
-  PAID
-  PROCESSING
-  SHIPPED
-  DELIVERED
-  CANCELLED
-  REFUNDED
-  PARTIALLY_REFUNDED
-}
-
-enum ShipmentStatus {
-  PENDING
-  LABEL_CREATED
-  SHIPPED
-  IN_TRANSIT
-  DELIVERED
-  RETURNED
-  EXCEPTION
-  CANCELLED
-}
-
-enum PaymentProvider {
-  STRIPE
-}
-
-enum PaymentLifecycleStatus {
-  PENDING
-  AUTHORIZED
-  CAPTURED
-  PARTIALLY_CAPTURED
-  FAILED
-  CANCELLED
-  REFUNDED
-  RELEASED
-}
-
-enum PaymentEventType {
-  AUTHORIZATION
-  CAPTURE
-  REFUND
-  VOID
-  ADJUSTMENT
-}
-
-enum MediaType {
-  IMAGE
-  VIDEO
-  DOCUMENT
-  PDF
+enum ServiceCatalogStatus {
+  ACTIVE
+  INACTIVE
+  DRAFT
 }
 
 enum ServiceRequestStatus {
+  DRAFT
   SUBMITTED
   UNDER_REVIEW
+  ACCEPTED
   QUOTED
-  QUOTATION_ACCEPTED
-  QUOTATION_REJECTED
   SCHEDULED
   IN_PROGRESS
   COMPLETED
   CANCELLED
+  REJECTED
+}
+
+enum RequestUrgency {
+  LOW
+  MEDIUM
+  HIGH
+  EMERGENCY
+}
+
+enum AttachmentKind {
+  PHOTO
+  VIDEO
+  DOCUMENT
 }
 
 enum QuotationStatus {
@@ -106,83 +96,95 @@ enum QuotationStatus {
   ACCEPTED
   REJECTED
   EXPIRED
-  CANCELLED
-  SUPERSEDED
 }
 
-enum QuotationLineType {
-  PART
-  SERVICE
-  ADJUSTMENT
-  DISCOUNT
-  OTHER
-}
-
-enum ScheduleStatus {
-  PENDING
+enum ServiceOrderStatus {
   SCHEDULED
   RESCHEDULED
+  TECHNICIAN_ASSIGNED
+  ON_THE_WAY
+  ARRIVED
   IN_PROGRESS
+  REPORT_SUBMITTED
   COMPLETED
   CANCELLED
-  NO_SHOW
-}
-
-enum TechnicianVisitOutcome {
-  FIXED
-  RETURN_VISIT_REQUIRED
-  PARTS_REQUIRED
-  NOT_RESOLVED
 }
 
 enum TechnicianStatus {
   ACTIVE
   INACTIVE
+  ON_LEAVE
   SUSPENDED
 }
 
-enum PortType {
-  HDH
-  CHAMELEON
-  CHAMELEON_ELITE
-  STANDARD
+enum EvidenceStage {
+  BEFORE_SERVICE
+  DURING_SERVICE
+  AFTER_SERVICE
 }
 
-enum FloorType {
-  BASEMENT
-  FIRST_FLOOR
-  SECOND_FLOOR
+enum EvidenceCategory {
+  MACHINE
+  MODEL_SERIAL_LABEL
+  DAMAGED_AREA
+  INLET_HOSE_ACCESSORY
   OTHER
 }
 
-enum AdditionalFeatureType {
-  VACPAN
-  SPOT_VACUUM
-  WALLY_FLEX
-}
-
-enum ReturnRequestStatus {
-  REQUESTED
-  APPROVED
-  REJECTED
-  RECEIVED
-  REFUNDED
-  CLOSED
-}
-
-enum NotificationChannel {
-  EMAIL
-  IN_APP
-}
-
-enum NotificationStatus {
+enum ProductOrderStatus {
   PENDING
-  SENT
+  PAID
+  PROCESSING
+  SHIPPED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  COMPLETED
   FAILED
-  READ
+  CANCELLED
+  REFUNDED
 }
 
-enum OtpPurpose {
-  EMAIL_VERIFICATION
-  PASSWORD_RESET
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  PARTIALLY_PAID
+  VOID
+  OVERDUE
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum ReviewType {
+  PRODUCT
+  SERVICE
+}
+
+enum ReviewStatus {
+  PENDING
+  PUBLISHED
+  HIDDEN
+}
+
+enum ReviewModerationAction {
+  CREATED
+  PUBLISHED
+  HIDDEN
+  DELETED
+}
+
+enum NotificationType {
+  SERVICE_REQUEST_UPDATE
+  QUOTATION_UPDATE
+  SCHEDULE_DISPATCH
+  ORDER_STATUS_UPDATE
+  BILLING_INVOICE
+  REVIEW_MODERATION
+  SYSTEM_ALERT
 }

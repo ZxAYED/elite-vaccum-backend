@@ -26,7 +26,9 @@ export class ServiceQuotationsService {
 
   private expireAt(quotation: { sentAt: Date | null; validForHours: number }) {
     if (!quotation.sentAt) return null;
-    return new Date(quotation.sentAt.getTime() + quotation.validForHours * 60 * 60 * 1000);
+    return new Date(
+      quotation.sentAt.getTime() + quotation.validForHours * 60 * 60 * 1000,
+    );
   }
 
   private async autoExpireIfNeeded(quotationId: string) {
@@ -56,7 +58,9 @@ export class ServiceQuotationsService {
 
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id: dto.serviceRequestId },
-      include: { customer: { select: { id: true, email: true, fullName: true } } },
+      include: {
+        customer: { select: { id: true, email: true, fullName: true } },
+      },
     });
 
     if (!request) {

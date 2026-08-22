@@ -7,7 +7,10 @@ export type EmailSendResult = {
   error?: string;
 };
 
-export type EmailTemplatePayload = Record<string, string | number | boolean | null | undefined>;
+export type EmailTemplatePayload = Record<
+  string,
+  string | number | boolean | null | undefined
+>;
 
 export type EmailTemplateRenderResult = {
   subject: string;

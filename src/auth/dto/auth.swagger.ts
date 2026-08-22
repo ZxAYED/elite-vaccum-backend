@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Role, UserStatus } from '@prisma/client';
+import { UserRole } from '@prisma/client';
 
 export class AuthUserResponseDto {
   @ApiProperty({ example: '2e6d4ef0-71e5-4e1c-8fcb-2cfd4a8c8ed6' })
@@ -8,26 +8,23 @@ export class AuthUserResponseDto {
   @ApiProperty({ example: 'admin@elitecentralvacuum.com' })
   email!: string;
 
-  @ApiProperty({ example: 'Elite Admin' })
-  fullName!: string;
+  @ApiProperty({ example: 'John' })
+  firstName!: string;
 
-  @ApiProperty({ enum: Role, example: Role.ADMIN })
-  role!: Role;
+  @ApiProperty({ example: 'Doe' })
+  lastName!: string;
 
-  @ApiProperty({ enum: UserStatus, example: UserStatus.ACTIVE })
-  status!: UserStatus;
+  @ApiProperty({ enum: UserRole, example: UserRole.CUSTOMER })
+  role!: UserRole;
+
+  @ApiProperty({ example: true })
+  isActive!: boolean;
 
   @ApiProperty({ example: '+1-555-100-1000', nullable: true })
   phone!: string | null;
 
-  @ApiProperty({ example: '+1-555-100-1001', nullable: true })
-  cellphone!: string | null;
-
-  @ApiProperty({ example: 'Elite Central Vacuum', nullable: true })
-  companyName!: string | null;
-
-  @ApiProperty({ example: true })
-  isEmailVerified!: boolean;
+  @ApiProperty({ example: '2026-08-16T10:00:00.000Z', nullable: true })
+  emailVerifiedAt!: Date | null;
 
   @ApiProperty({ example: '2026-08-16T10:00:00.000Z' })
   createdAt!: Date;

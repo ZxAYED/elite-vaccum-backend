@@ -33,7 +33,12 @@ export class ServiceRequestsService {
     const map: Record<ServiceRequestStatus, ServiceRequestStatus[]> = {
       SUBMITTED: ['UNDER_REVIEW', 'QUOTED', 'CANCELLED'],
       UNDER_REVIEW: ['QUOTED', 'CANCELLED', 'SUBMITTED'],
-      QUOTED: ['QUOTATION_ACCEPTED', 'QUOTATION_REJECTED', 'UNDER_REVIEW', 'CANCELLED'],
+      QUOTED: [
+        'QUOTATION_ACCEPTED',
+        'QUOTATION_REJECTED',
+        'UNDER_REVIEW',
+        'CANCELLED',
+      ],
       QUOTATION_ACCEPTED: ['SCHEDULED', 'UNDER_REVIEW', 'CANCELLED'],
       QUOTATION_REJECTED: ['UNDER_REVIEW', 'QUOTED', 'CANCELLED'],
       SCHEDULED: ['IN_PROGRESS', 'CANCELLED', 'UNDER_REVIEW'],
@@ -74,7 +79,11 @@ export class ServiceRequestsService {
       },
     });
 
-    if (!serviceType || !serviceType.isActive || !serviceType.serviceCategory.isActive) {
+    if (
+      !serviceType ||
+      !serviceType.isActive ||
+      !serviceType.serviceCategory.isActive
+    ) {
       throw new BadRequestException('Invalid service type');
     }
 
@@ -87,7 +96,9 @@ export class ServiceRequestsService {
         addressId: dto.addressId,
         customerMachineId: dto.customerMachineId,
         serviceLocationText: dto.serviceLocationText,
-        preferredDate: dto.preferredDate ? new Date(dto.preferredDate) : undefined,
+        preferredDate: dto.preferredDate
+          ? new Date(dto.preferredDate)
+          : undefined,
         preferredTime: dto.preferredTime,
         problemDescription: dto.description ?? 'No description provided',
         additionalNotes: dto.additionalNotes,
@@ -102,7 +113,12 @@ export class ServiceRequestsService {
       },
     });
 
-    const uploadedFiles: { id: string; url: string; type: string; fileName: string | null }[] = [];
+    const uploadedFiles: {
+      id: string;
+      url: string;
+      type: string;
+      fileName: string | null;
+    }[] = [];
 
     if (files && files.length > 0) {
       for (const file of files) {
@@ -111,7 +127,9 @@ export class ServiceRequestsService {
           !file.mimetype.startsWith('video/') &&
           !file.mimetype.startsWith('application/')
         ) {
-          throw new BadRequestException(`Unsupported file type: ${file.mimetype}`);
+          throw new BadRequestException(
+            `Unsupported file type: ${file.mimetype}`,
+          );
         }
 
         const uploaded = await this.s3UploadService.uploadFile({
@@ -187,7 +205,9 @@ export class ServiceRequestsService {
       ...(admin && query.serviceCategoryId
         ? { serviceCategoryId: query.serviceCategoryId }
         : {}),
-      ...(admin && query.serviceTypeId ? { serviceTypeId: query.serviceTypeId } : {}),
+      ...(admin && query.serviceTypeId
+        ? { serviceTypeId: query.serviceTypeId }
+        : {}),
     };
 
     const totalItems = await this.prisma.serviceRequest.count({ where });
@@ -230,7 +250,11 @@ export class ServiceRequestsService {
           orderBy: { createdAt: 'desc' },
         },
         ...(this.isAdmin(actor)
-          ? { customer: { select: { id: true, fullName: true, email: true, phone: true } } }
+          ? {
+              customer: {
+                select: { id: true, fullName: true, email: true, phone: true },
+              },
+            }
           : {}),
       },
     });
@@ -244,10 +268,7 @@ export class ServiceRequestsService {
     }
 
     if (!this.isAdmin(actor)) {
-      const {
-        adminInternalNote,
-        ...safe
-      } = request;
+      const { adminInternalNote, ...safe } = request;
       return safe;
     }
 
@@ -277,7 +298,9 @@ export class ServiceRequestsService {
     }
 
     if (!admin && (dto.status || dto.adminInternalNote !== undefined)) {
-      throw new ForbiddenException('Customer cannot update status/internal notes');
+      throw new ForbiddenException(
+        'Customer cannot update status/internal notes',
+      );
     }
 
     let nextStatus = existing.status;
@@ -331,7 +354,9 @@ export class ServiceRequestsService {
         ...(dto.preferredDate
           ? { preferredDate: new Date(dto.preferredDate) }
           : {}),
-        ...(dto.preferredTime !== undefined ? { preferredTime: dto.preferredTime } : {}),
+        ...(dto.preferredTime !== undefined
+          ? { preferredTime: dto.preferredTime }
+          : {}),
       },
     });
 
@@ -403,7 +428,9 @@ export class ServiceRequestsService {
     ];
 
     if (!cancellableStatuses.includes(request.status)) {
-      throw new BadRequestException('Request cannot be cancelled at this stage');
+      throw new BadRequestException(
+        'Request cannot be cancelled at this stage',
+      );
     }
 
     await this.prisma.serviceRequest.update({

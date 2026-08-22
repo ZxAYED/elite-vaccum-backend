@@ -1,12 +1,20 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ProductAvailability } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsInt, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, Min } from 'class-validator';
 
 export class UpdateProductStockDto {
-  @ApiProperty({ example: 25 })
+  @ApiProperty({ example: 25, description: 'Updated inventory count' })
   @Type(() => Number)
   @IsInt()
   @Min(0)
-  stockQuantity!: number;
-}
+  readonly quantity!: number;
 
+  @ApiPropertyOptional({
+    enum: ProductAvailability,
+    description: 'Optional availability status override',
+  })
+  @IsOptional()
+  @IsEnum(ProductAvailability)
+  readonly availability?: ProductAvailability;
+}

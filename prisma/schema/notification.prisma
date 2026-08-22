@@ -1,18 +1,36 @@
-model Notification {
-  id            String             @id @default(uuid())
-  userId        String?
-  user          User?              @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
-  title         String
-  body          String             @db.Text
-  channel       NotificationChannel
-  status        NotificationStatus @default(PENDING)
-  referenceType String?
-  referenceId   String?
-  sentAt        DateTime?
-  readAt        DateTime?
-  createdAt     DateTime           @default(now())
+// ==========================================
+// 11. NOTIFICATIONS
+// ==========================================
 
-  @@index([userId])
-  @@index([status])
-  @@index([channel])
+model Notification {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  type      NotificationType
+  title     String           @db.VarChar(200)
+  message   String           @db.Text
+  isRead    Boolean          @default(false) @map("is_read")
+  readAt    DateTime?        @map("read_at") @db.Timestamptz
+  ctaLabel  String?          @map("cta_label") @db.VarChar(100)
+  ctaUrl    String?          @map("cta_url") @db.VarChar(255)
+  metadata  Json?
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt])
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  id                 String   @id @default(uuid()) @db.Uuid
+  userId             String   @unique @map("user_id") @db.Uuid
+  emailNotifications Boolean  @default(true) @map("email_notifications")
+  smsNotifications   Boolean  @default(false) @map("sms_notifications")
+  pushNotifications  Boolean  @default(true) @map("push_notifications")
+  preferences        Json?
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
 }

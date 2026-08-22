@@ -1,0 +1,91 @@
+// ==========================================
+// 6. QUOTATION DOMAIN
+// ==========================================
+
+model Quotation {
+  id               String          @id @default(uuid()) @db.Uuid
+  businessId       String          @unique @map("business_id") @db.VarChar(50) // QUO-XXXXX
+  serviceRequestId String          @map("service_request_id") @db.Uuid
+  customerId       String          @map("customer_id") @db.Uuid
+  serviceId        String          @map("service_id") @db.Uuid
+  serviceOrderId   String?         @unique @map("service_order_id") @db.Uuid
+  status           QuotationStatus @default(DRAFT)
+  version          Int             @default(1)
+  subtotalUsd      Decimal         @map("subtotal_usd") @db.Decimal(10, 2)
+  taxUsd           Decimal         @default(0.00) @map("tax_usd") @db.Decimal(10, 2)
+  discountUsd      Decimal         @default(0.00) @map("discount_usd") @db.Decimal(10, 2)
+  totalUsd         Decimal         @map("total_usd") @db.Decimal(10, 2)
+  notes            String?         @db.Text
+  terms            String?         @db.Text
+  issuedAt         DateTime        @default(now()) @map("issued_at") @db.Timestamptz
+  expiresAt        DateTime?       @map("expires_at") @db.Timestamptz
+  sentAt           DateTime?       @map("sent_at") @db.Timestamptz
+  viewedAt         DateTime?       @map("viewed_at") @db.Timestamptz
+  acceptedAt       DateTime?       @map("accepted_at") @db.Timestamptz
+  rejectedAt       DateTime?       @map("rejected_at") @db.Timestamptz
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamptz
+
+  serviceRequest   ServiceRequest       @relation(fields: [serviceRequestId], references: [id], onDelete: Restrict)
+  customer         Customer             @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  service          Service              @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  serviceOrder     ServiceOrder?        @relation("ServiceOrderQuotation", fields: [serviceOrderId], references: [id], onDelete: SetNull)
+  lineItems        QuotationLineItem[]
+  revisionHistory  QuotationRevision[]
+  rejectionHistory QuotationRejection[]
+  invoices         Invoice[]
+
+  @@index([serviceRequestId])
+  @@index([customerId, status])
+  @@map("quotations")
+}
+
+model QuotationLineItem {
+  id           String   @id @default(uuid()) @db.Uuid
+  quotationId  String   @map("quotation_id") @db.Uuid
+  description  String   @db.VarChar(255)
+  quantity     Int      @default(1)
+  unitPriceUsd Decimal  @map("unit_price_usd") @db.Decimal(10, 2)
+  totalUsd     Decimal  @map("total_usd") @db.Decimal(10, 2)
+  note         String?  @db.Text
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  @@index([quotationId, sortOrder])
+  @@map("quotation_line_items")
+}
+
+model QuotationRevision {
+  id           String   @id @default(uuid()) @db.Uuid
+  quotationId  String   @map("quotation_id") @db.Uuid
+  version      Int
+  status       String   @db.VarChar(50)
+  subtotalUsd  Decimal  @map("subtotal_usd") @db.Decimal(10, 2)
+  discountUsd  Decimal  @map("discount_usd") @db.Decimal(10, 2)
+  taxUsd       Decimal  @map("tax_usd") @db.Decimal(10, 2)
+  totalUsd     Decimal  @map("total_usd") @db.Decimal(10, 2)
+  reason       String?  @db.Text
+  snapshotData Json     @map("snapshot_data") // Line items and configuration backup
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  @@index([quotationId, version])
+  @@map("quotation_revisions")
+}
+
+model QuotationRejection {
+  id          String   @id @default(uuid()) @db.Uuid
+  quotationId String   @map("quotation_id") @db.Uuid
+  reason      String   @db.VarChar(255)
+  comments    String?  @db.Text
+  actorLabel  String   @map("actor_label") @db.VarChar(100)
+  rejectedAt  DateTime @default(now()) @map("rejected_at") @db.Timestamptz
+
+  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  @@index([quotationId])
+  @@map("quotation_rejections")
+}

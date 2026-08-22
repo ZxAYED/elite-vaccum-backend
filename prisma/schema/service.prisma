@@ -1,434 +1,129 @@
-model ServiceCategory {
-  id          String           @id @default(uuid())
-  name        String           @unique
-  slug        String           @unique
-  description String?          @db.Text
-  isActive    Boolean          @default(true)
-  sortOrder   Int              @default(0)
-  serviceTypes ServiceType[]
-  requests    ServiceRequest[]
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+// ==========================================
+// 5. SERVICES & SERVICE REQUESTS
+// ==========================================
 
-  @@index([isActive])
-  @@index([sortOrder])
+model Service {
+  id           String               @id @default(uuid()) @db.Uuid
+  slug         String               @unique @db.VarChar(100)
+  name         String               @db.VarChar(150)
+  category     String               @db.VarChar(100)
+  description  String               @db.Text
+  basePriceUsd Decimal?             @map("base_price_usd") @db.Decimal(10, 2)
+  status       ServiceCatalogStatus @default(ACTIVE)
+  commonIssues String[]             @default([]) @map("common_issues")
+  createdAt    DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime             @updatedAt @map("updated_at") @db.Timestamptz
+
+  publicOfferings PublicServiceOffering[]
+  serviceRequests ServiceRequest[]
+  quotations      Quotation[]
+  reviews         CustomerReview[]
+
+  @@map("services")
 }
 
-model ServiceType {
-  id                String           @id @default(uuid())
-  serviceCategoryId String
-  serviceCategory   ServiceCategory  @relation(fields: [serviceCategoryId], references: [id], onDelete: Restrict)
-  name              String
-  slug              String
-  description       String?          @db.Text
-  isActive          Boolean          @default(true)
-  sortOrder         Int              @default(0)
-  requests          ServiceRequest[]
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
+model PublicServiceOffering {
+  id          String       @id @default(uuid()) @db.Uuid
+  serviceId   String       @map("service_id") @db.Uuid
+  slug        String       @unique @db.VarChar(100)
+  group       ServiceGroup
+  title       String       @db.VarChar(150)
+  summary     String       @db.Text
+  description String?      @db.Text
+  iconKey     String       @map("icon_key") @db.VarChar(50)
+  imageUrl    String?      @map("image_url") @db.VarChar(500)
+  status      String       @default("ACTIVE") @db.VarChar(50)
+  sortOrder   Int          @default(0) @map("sort_order")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz
 
-  @@unique([serviceCategoryId, slug])
-  @@unique([serviceCategoryId, name])
-  @@index([serviceCategoryId])
-  @@index([isActive])
-  @@index([sortOrder])
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([group, sortOrder])
+  @@map("public_service_offerings")
 }
 
 model ServiceRequest {
-  id                 String               @id @default(uuid())
-  requestNumber      String               @unique
-  customerId         String
-  customer           User                 @relation("ServiceRequestsByCustomer", fields: [customerId], references: [id], onDelete: Restrict)
-  serviceCategoryId  String
-  serviceCategory    ServiceCategory      @relation(fields: [serviceCategoryId], references: [id], onDelete: Restrict)
-  serviceTypeId      String
-  serviceType        ServiceType          @relation(fields: [serviceTypeId], references: [id], onDelete: Restrict)
-  addressId          String?
-  serviceAddress     Address?             @relation(fields: [addressId], references: [id], onDelete: SetNull)
-  customerMachineId  String?
-  customerMachine    CustomerMachine?     @relation(fields: [customerMachineId], references: [id], onDelete: SetNull)
-  status             ServiceRequestStatus @default(SUBMITTED)
-  serviceLocationText String?
-  preferredDate      DateTime?
-  preferredTime      String?
-  problemDescription String               @db.Text
-  additionalNotes    String?              @db.Text
-  previousMachineInfo String?             @db.Text
-  adminInternalNote  String?              @db.Text
-  latestQuotedAmount Decimal?             @db.Decimal(10, 2)
-  quotationAcceptedAt DateTime?
-  quotationRejectedAt DateTime?
-  scheduledAt        DateTime?
-  completedAt        DateTime?
-  cancelledAt        DateTime?
+  id                   String               @id @default(uuid()) @db.Uuid
+  businessId           String               @unique @map("business_id") @db.VarChar(50) // REQ-XXXXX
+  customerId           String               @map("customer_id") @db.Uuid
+  serviceId            String               @map("service_id") @db.Uuid
+  propertyId           String?              @map("property_id") @db.Uuid
+  assignedTechnicianId String?              @map("assigned_technician_id") @db.Uuid
+  title                String               @db.VarChar(200)
+  description          String               @db.Text
+  status               ServiceRequestStatus @default(SUBMITTED)
+  urgency              RequestUrgency       @default(MEDIUM)
+  preferredDate        String               @map("preferred_date") @db.VarChar(50)
+  preferredTime        String               @map("preferred_time") @db.VarChar(50)
+  propertyLabel        String               @map("property_label") @db.VarChar(100)
+  serviceAddress       Json                 @map("service_address") // Snapshot of location
+  requestedSchedule    Json                 @map("requested_schedule") // Permanent original requested window { date, time, label }
+  currentSchedule      Json?                @map("current_schedule") // Active/adjusted schedule window { date, time, label }
+  estimatedAmountUsd   Decimal?             @map("estimated_amount_usd") @db.Decimal(10, 2)
+  problemLocation      String?              @map("problem_location") @db.VarChar(150)
+  additionalNotes      String?              @map("additional_notes") @db.Text
+  submittedAt          DateTime             @default(now()) @map("submitted_at") @db.Timestamptz
+  updatedAt            DateTime             @updatedAt @map("updated_at") @db.Timestamptz
 
-  media             ServiceRequestMedia[]
-  equipmentSnapshot ServiceEquipmentSnapshot?
-  quotations        ServiceQuotation[]
-  schedules         ServiceSchedule[]
-  payments          ServicePayment[]
-  visits            ServiceVisit[]
-  completion        ServiceCompletion?
+  customer           Customer                   @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  service            Service                    @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  property           CustomerProperty?          @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  assignedTechnician Technician?                @relation("TechnicianServiceRequests", fields: [assignedTechnicianId], references: [id], onDelete: SetNull)
+  equipment          ServiceRequestEquipment?
+  attachments        ServiceRequestAttachment[]
+  rejectionHistory   ServiceRequestRejection[]
+  quotations         Quotation[]
+  serviceOrder       ServiceOrder?
+  appointments       Appointment[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([customerId])
-  @@index([serviceCategoryId])
-  @@index([serviceTypeId])
-  @@index([status])
-  @@index([preferredDate])
-  @@index([customerMachineId])
+  @@index([customerId, status])
+  @@index([status, submittedAt])
+  @@map("service_requests")
 }
 
-model ServiceRequestMedia {
-  id               String         @id @default(uuid())
-  serviceRequestId String
-  serviceRequest   ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
-  type             MediaType
-  url              String
-  objectKey        String?
-  fileName         String?
-  mimeType         String?
-  size             Int?
-  createdAt        DateTime       @default(now())
+model ServiceRequestEquipment {
+  id               String   @id @default(uuid()) @db.Uuid
+  serviceRequestId String   @unique @map("service_request_id") @db.Uuid
+  manufacturer     String?  @db.VarChar(100)
+  modelNumber      String?  @map("model_number") @db.VarChar(100)
+  serialNumber     String?  @map("serial_number") @db.VarChar(100)
+  unitLocation     String?  @map("unit_location") @db.VarChar(100)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+
+  @@map("service_request_equipment")
+}
+
+model ServiceRequestAttachment {
+  id               String         @id @default(uuid()) @db.Uuid
+  serviceRequestId String         @map("service_request_id") @db.Uuid
+  fileName         String         @map("file_name") @db.VarChar(255)
+  fileType         String         @map("file_type") @db.VarChar(100)
+  sizeBytes        Int            @map("size_bytes")
+  url              String         @db.VarChar(500)
+  kind             AttachmentKind
+  category         String?        @db.VarChar(100)
+  note             String?        @db.Text
+  uploadedAt       DateTime       @default(now()) @map("uploaded_at") @db.Timestamptz
+
+  serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
 
   @@index([serviceRequestId])
-  @@index([type])
+  @@map("service_request_attachments")
 }
 
-model CustomerMachine {
-  id                 String                          @id @default(uuid())
-  customerId         String
-  customer           User                            @relation("MachineOwner", fields: [customerId], references: [id], onDelete: Cascade)
-  installedAddressId String?
-  installedAddress   Address?                        @relation("MachineInstalledAddress", fields: [installedAddressId], references: [id], onDelete: SetNull)
-  label              String?
-  equipmentType      String?
-  manufacturer       String?
-  model              String?
-  serialNumber       String?
-  condition          String?
-  notes              String?                         @db.Text
-  isActive           Boolean                         @default(true)
+model ServiceRequestRejection {
+  id               String   @id @default(uuid()) @db.Uuid
+  serviceRequestId String   @map("service_request_id") @db.Uuid
+  reason           String   @db.VarChar(255)
+  comments         String?  @db.Text
+  actorLabel       String   @map("actor_label") @db.VarChar(100)
+  rejectedAt       DateTime @default(now()) @map("rejected_at") @db.Timestamptz
 
-  serviceRequests    ServiceRequest[]
-  floorPorts         CustomerMachineFloorPort[]
-  additionalFeatures CustomerMachineAdditionalFeature[]
-  mainUnits          CustomerMachineMainUnit[]
-  equipmentSnapshots ServiceEquipmentSnapshot[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([customerId])
-  @@index([installedAddressId])
-  @@index([serialNumber])
-  @@index([isActive])
-}
-
-model CustomerMachineFloorPort {
-  id                String          @id @default(uuid())
-  customerMachineId String
-  customerMachine   CustomerMachine @relation(fields: [customerMachineId], references: [id], onDelete: Cascade)
-  floorType         FloorType
-  portType          PortType
-  quantity          Int             @default(0)
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-
-  @@unique([customerMachineId, floorType, portType])
-  @@index([customerMachineId])
-}
-
-model CustomerMachineAdditionalFeature {
-  id                String                @id @default(uuid())
-  customerMachineId String
-  customerMachine   CustomerMachine       @relation(fields: [customerMachineId], references: [id], onDelete: Cascade)
-  featureType       AdditionalFeatureType
-  quantity          Int                   @default(0)
-  location          String?
-  createdAt         DateTime              @default(now())
-  updatedAt         DateTime              @updatedAt
-
-  @@index([customerMachineId])
-  @@index([featureType])
-}
-
-model CustomerMachineMainUnit {
-  id                String          @id @default(uuid())
-  customerMachineId String
-  customerMachine   CustomerMachine @relation(fields: [customerMachineId], references: [id], onDelete: Cascade)
-  unitNumber        Int
-  manufacturer      String?
-  model             String?
-  serialNumber      String?
-  location          String?
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-
-  @@unique([customerMachineId, unitNumber])
-  @@index([customerMachineId])
-}
-
-model ServiceEquipmentSnapshot {
-  id                         String                           @id @default(uuid())
-  serviceRequestId           String                           @unique
-  serviceRequest             ServiceRequest                   @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
-  customerMachineId          String?
-  customerMachine            CustomerMachine?                 @relation(fields: [customerMachineId], references: [id], onDelete: SetNull)
-  equipmentType              String?
-  manufacturer               String?
-  model                      String?
-  serialNumber               String?
-  condition                  String?
-  problemSymptoms            String?                          @db.Text
-  previousRepairHistory      String?                          @db.Text
-  previousCustomerMachineInfo String?                         @db.Text
-  notes                      String?                          @db.Text
-
-  floorPorts         ServiceEquipmentFloorPort[]
-  additionalFeatures ServiceEquipmentAdditionalFeature[]
-  mainUnits          ServiceEquipmentMainUnit[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([customerMachineId])
-}
-
-model ServiceEquipmentFloorPort {
-  id           String                   @id @default(uuid())
-  snapshotId   String
-  snapshot     ServiceEquipmentSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
-  floorType    FloorType
-  portType     PortType
-  quantity     Int                      @default(0)
-  createdAt    DateTime                 @default(now())
-  updatedAt    DateTime                 @updatedAt
-
-  @@unique([snapshotId, floorType, portType])
-  @@index([snapshotId])
-}
-
-model ServiceEquipmentAdditionalFeature {
-  id           String                   @id @default(uuid())
-  snapshotId   String
-  snapshot     ServiceEquipmentSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
-  featureType  AdditionalFeatureType
-  quantity     Int                      @default(0)
-  location     String?
-  createdAt    DateTime                 @default(now())
-  updatedAt    DateTime                 @updatedAt
-
-  @@index([snapshotId])
-  @@index([featureType])
-}
-
-model ServiceEquipmentMainUnit {
-  id           String                   @id @default(uuid())
-  snapshotId   String
-  snapshot     ServiceEquipmentSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
-  unitNumber   Int
-  manufacturer String?
-  model        String?
-  serialNumber String?
-  location     String?
-  createdAt    DateTime                 @default(now())
-  updatedAt    DateTime                 @updatedAt
-
-  @@unique([snapshotId, unitNumber])
-  @@index([snapshotId])
-}
-
-model ServiceQuotation {
-  id                    String              @id @default(uuid())
-  serviceRequestId      String
-  serviceRequest        ServiceRequest      @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
-  version               Int
-  status                QuotationStatus     @default(DRAFT)
-  pdfUrl                String?
-  subtotalAmount        Decimal             @db.Decimal(10, 2)
-  taxAmount             Decimal             @default(0) @db.Decimal(10, 2)
-  discountAmount        Decimal             @default(0) @db.Decimal(10, 2)
-  finalAmount           Decimal             @db.Decimal(10, 2)
-  termsAndNotes         String?             @db.Text
-  validForHours         Int                 @default(24)
-  sentAt                DateTime?
-  viewedAt              DateTime?
-  respondedAt           DateTime?
-  acceptedAt            DateTime?
-  rejectedAt            DateTime?
-  rejectionReason       String?             @db.Text
-  termsAcceptedAt       DateTime?
-  supersedesQuotationId String?
-  supersedesQuotation   ServiceQuotation?   @relation("QuotationRevision", fields: [supersedesQuotationId], references: [id], onDelete: SetNull)
-  revisions             ServiceQuotation[]  @relation("QuotationRevision")
-  createdById           String?
-  createdBy             User?               @relation("QuotationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedById           String?
-  updatedBy             User?               @relation("QuotationUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
-
-  lineItems ServiceQuotationLineItem[]
-  payments  ServicePayment[]
-  schedules ServiceSchedule[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([serviceRequestId, version])
-  @@index([serviceRequestId])
-  @@index([status])
-  @@index([validForHours])
-}
-
-model ServiceQuotationLineItem {
-  id          String              @id @default(uuid())
-  quotationId String
-  quotation   ServiceQuotation    @relation(fields: [quotationId], references: [id], onDelete: Cascade)
-  lineType    QuotationLineType   @default(OTHER)
-  description String
-  quantity    Int                 @default(1)
-  unitPrice   Decimal             @db.Decimal(10, 2)
-  lineTotal   Decimal             @db.Decimal(10, 2)
-  sortOrder   Int                 @default(0)
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
-
-  @@index([quotationId])
-  @@index([sortOrder])
-}
-
-model ServiceSchedule {
-  id                     String           @id @default(uuid())
-  serviceRequestId       String
-  serviceRequest         ServiceRequest   @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
-  quotationId            String?
-  quotation              ServiceQuotation? @relation(fields: [quotationId], references: [id], onDelete: SetNull)
-  assignedTechnicianId   String?
-  assignedTechnician     User?            @relation("ScheduleAssignedTechnician", fields: [assignedTechnicianId], references: [id], onDelete: SetNull)
-  status                 ScheduleStatus   @default(PENDING)
-  scheduledStart         DateTime
-  scheduledEnd           DateTime?
-  estimatedDurationMinutes Int?
-  serviceAddressSnapshot Json?
-  customerNote           String?          @db.Text
-  internalNote           String?          @db.Text
-  cancelReason           String?          @db.Text
-  createdById            String?
-  createdBy              User?            @relation("ScheduleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedById            String?
-  updatedBy              User?            @relation("ScheduleUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
-
-  visits ServiceVisit[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
 
   @@index([serviceRequestId])
-  @@index([quotationId])
-  @@index([assignedTechnicianId])
-  @@index([status])
-  @@index([scheduledStart])
-}
-
-model ServicePayment {
-  id                  String                 @id @default(uuid())
-  serviceRequestId    String
-  serviceRequest      ServiceRequest         @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
-  quotationId         String?
-  quotation           ServiceQuotation?      @relation(fields: [quotationId], references: [id], onDelete: SetNull)
-  provider            PaymentProvider        @default(STRIPE)
-  eventType           PaymentEventType
-  status              PaymentLifecycleStatus @default(PENDING)
-  paymentIntentId     String?
-  chargeId            String?
-  authorizationAmount Decimal?               @db.Decimal(10, 2)
-  capturedAmount      Decimal?               @db.Decimal(10, 2)
-  refundedAmount      Decimal?               @default(0) @db.Decimal(10, 2)
-  currency            String                 @default("USD")
-  stripePayload       Json?
-  processedAt         DateTime?
-  createdAt           DateTime               @default(now())
-  updatedAt           DateTime               @updatedAt
-
-  @@index([serviceRequestId])
-  @@index([quotationId])
-  @@index([status])
-  @@index([paymentIntentId])
-}
-
-model ServiceVisit {
-  id                    String                  @id @default(uuid())
-  serviceRequestId      String
-  serviceRequest        ServiceRequest          @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
-  scheduleId            String?
-  schedule              ServiceSchedule?        @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
-  technicianId          String?
-  technician            User?                   @relation("VisitTechnician", fields: [technicianId], references: [id], onDelete: SetNull)
-  outcome               TechnicianVisitOutcome?
-  startedAt             DateTime?
-  endedAt               DateTime?
-  workSummary           String?                 @db.Text
-  partsNeeded           String?                 @db.Text
-  followUpRecommendation String?                @db.Text
-
-  media     ServiceVisitMedia[]
-  partsUsed ServicePartUsed[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([serviceRequestId])
-  @@index([scheduleId])
-  @@index([technicianId])
-}
-
-model ServiceVisitMedia {
-  id             String       @id @default(uuid())
-  visitId        String
-  visit          ServiceVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
-  type           MediaType
-  url            String
-  objectKey      String?
-  fileName       String?
-  mimeType       String?
-  size           Int?
-  createdAt      DateTime     @default(now())
-
-  @@index([visitId])
-  @@index([type])
-}
-
-model ServicePartUsed {
-  id         String       @id @default(uuid())
-  visitId    String
-  visit      ServiceVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
-  partName   String
-  quantity   Int          @default(1)
-  unitCost   Decimal?     @db.Decimal(10, 2)
-  totalCost  Decimal?     @db.Decimal(10, 2)
-  note       String?      @db.Text
-  createdAt  DateTime     @default(now())
-  updatedAt  DateTime     @updatedAt
-
-  @@index([visitId])
-}
-
-model ServiceCompletion {
-  id                    String         @id @default(uuid())
-  serviceRequestId      String         @unique
-  serviceRequest        ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
-  completedByAdminId    String?
-  completedByAdmin      User?          @relation("ServiceCompletionAdmin", fields: [completedByAdminId], references: [id], onDelete: SetNull)
-  repairSummary         String?        @db.Text
-  completionNotes       String?        @db.Text
-  finalAmount           Decimal?       @db.Decimal(10, 2)
-  warrantyNote          String?        @db.Text
-  followUpRecommendation String?       @db.Text
-  completedAt           DateTime       @default(now())
-  createdAt             DateTime       @default(now())
-  updatedAt             DateTime       @updatedAt
-
-  @@index([completedByAdminId])
+  @@map("service_request_rejections")
 }

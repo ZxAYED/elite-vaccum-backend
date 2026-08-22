@@ -1,0 +1,89 @@
+// ==========================================
+// 9. FINANCIALS, INVOICES & PAYMENTS
+// ==========================================
+
+model Invoice {
+  id             String        @id @default(uuid()) @db.Uuid
+  businessId     String        @unique @map("business_id") @db.VarChar(50) // INV-XXXXX
+  customerId     String        @map("customer_id") @db.Uuid
+  productOrderId String?       @map("product_order_id") @db.Uuid
+  serviceOrderId String?       @map("service_order_id") @db.Uuid
+  quotationId    String?       @map("quotation_id") @db.Uuid
+  status         InvoiceStatus @default(ISSUED)
+  issueDate      DateTime      @default(now()) @map("issue_date") @db.Timestamptz
+  dueDate        DateTime      @map("due_date") @db.Timestamptz
+  paidAt         DateTime?     @map("paid_at") @db.Timestamptz
+  subtotalUsd    Decimal       @map("subtotal_usd") @db.Decimal(10, 2)
+  taxUsd         Decimal       @default(0.00) @map("tax_usd") @db.Decimal(10, 2)
+  discountUsd    Decimal       @default(0.00) @map("discount_usd") @db.Decimal(10, 2)
+  totalUsd       Decimal       @map("total_usd") @db.Decimal(10, 2)
+  notes          String?       @db.Text
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+
+  customer     Customer          @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  productOrder ProductOrder?     @relation(fields: [productOrderId], references: [id], onDelete: SetNull)
+  serviceOrder ServiceOrder?     @relation(fields: [serviceOrderId], references: [id], onDelete: SetNull)
+  quotation    Quotation?        @relation(fields: [quotationId], references: [id], onDelete: SetNull)
+  lineItems    InvoiceLineItem[]
+  payments     Payment[]
+  refunds      Refund[]
+
+  @@index([customerId, status])
+  @@index([status, dueDate])
+  @@map("invoices")
+}
+
+model InvoiceLineItem {
+  id           String   @id @default(uuid()) @db.Uuid
+  invoiceId    String   @map("invoice_id") @db.Uuid
+  description  String   @db.VarChar(255)
+  quantity     Int      @default(1)
+  unitPriceUsd Decimal  @map("unit_price_usd") @db.Decimal(10, 2)
+  totalUsd     Decimal  @map("total_usd") @db.Decimal(10, 2)
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId, sortOrder])
+  @@map("invoice_line_items")
+}
+
+model Payment {
+  id                   String        @id @default(uuid()) @db.Uuid
+  invoiceId            String        @map("invoice_id") @db.Uuid
+  customerId           String        @map("customer_id") @db.Uuid
+  amountUsd            Decimal       @map("amount_usd") @db.Decimal(10, 2)
+  status               PaymentStatus @default(PENDING)
+  methodLabel          String        @map("method_label") @db.VarChar(50) // Credit Card, Stripe, Cash, Check
+  transactionReference String?       @unique @map("transaction_reference") @db.VarChar(255)
+  technicianPayoutUsd  Decimal?      @map("technician_payout_usd") @db.Decimal(10, 2)
+  platformFeeUsd       Decimal?      @map("platform_fee_usd") @db.Decimal(10, 2)
+  processedAt          DateTime      @default(now()) @map("processed_at") @db.Timestamptz
+  updatedAt            DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+
+  invoice  Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  refunds  Refund[]
+
+  @@index([customerId])
+  @@index([invoiceId])
+  @@map("payments")
+}
+
+model Refund {
+  id          String   @id @default(uuid()) @db.Uuid
+  paymentId   String   @map("payment_id") @db.Uuid
+  invoiceId   String   @map("invoice_id") @db.Uuid
+  amountUsd   Decimal  @map("amount_usd") @db.Decimal(10, 2)
+  status      String   @default("COMPLETED") @db.VarChar(50)
+  reason      String   @db.Text
+  processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  @@index([paymentId])
+  @@map("refunds")
+}

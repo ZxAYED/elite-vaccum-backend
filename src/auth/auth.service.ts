@@ -49,8 +49,11 @@ export class AuthService {
   }
 
   private getOtpExpiryDate() {
-    const minutesRaw = Number(this.configService.get<string>('OTP_EXPIRES_MINUTES') ?? '10');
-    const minutes = Number.isFinite(minutesRaw) && minutesRaw > 0 ? minutesRaw : 10;
+    const minutesRaw = Number(
+      this.configService.get<string>('OTP_EXPIRES_MINUTES') ?? '10',
+    );
+    const minutes =
+      Number.isFinite(minutesRaw) && minutesRaw > 0 ? minutesRaw : 10;
     return new Date(Date.now() + minutes * 60 * 1000);
   }
 
@@ -126,7 +129,9 @@ export class AuthService {
         ? 'Verify your account'
         : 'Reset your password';
 
-    const minutesRaw = Number(this.configService.get<string>('OTP_EXPIRES_MINUTES') ?? '10');
+    const minutesRaw = Number(
+      this.configService.get<string>('OTP_EXPIRES_MINUTES') ?? '10',
+    );
     const validForMinutes =
       Number.isFinite(minutesRaw) && minutesRaw > 0 ? minutesRaw : 10;
 
@@ -206,9 +211,9 @@ export class AuthService {
       throw new UnauthorizedException('Refresh token secret is not configured');
     }
 
-    const expiresIn =
-      (this.configService.get<string>('REFRESH_JWT_EXPIRES_IN') ??
-        '30d') as StringValue;
+    const expiresIn = (this.configService.get<string>(
+      'REFRESH_JWT_EXPIRES_IN',
+    ) ?? '30d') as StringValue;
 
     return this.jwt.signAsync(
       {
@@ -258,7 +263,8 @@ export class AuthService {
 
       await this.createAndSendOtp(email, OtpPurpose.EMAIL_VERIFICATION);
       return {
-        message: 'Verification OTP sent. Check your email to verify your account.',
+        message:
+          'Verification OTP sent. Check your email to verify your account.',
       };
     }
 
@@ -337,7 +343,11 @@ export class AuthService {
       throw new ConflictException('User already verified');
     }
 
-    await this.validateOtpOrThrow(email, OtpPurpose.EMAIL_VERIFICATION, params.otp);
+    await this.validateOtpOrThrow(
+      email,
+      OtpPurpose.EMAIL_VERIFICATION,
+      params.otp,
+    );
 
     await this.prisma.user.update({
       where: { id: user.id },
@@ -496,7 +506,8 @@ export class AuthService {
     }
 
     const tokenPayload = payload as Record<string, unknown>;
-    const userId = typeof tokenPayload.sub === 'string' ? tokenPayload.sub : null;
+    const userId =
+      typeof tokenPayload.sub === 'string' ? tokenPayload.sub : null;
 
     if (!userId || tokenPayload.tokenType !== 'refresh') {
       throw new UnauthorizedException('Invalid refresh token');

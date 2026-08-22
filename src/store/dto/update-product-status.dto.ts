@@ -1,16 +1,17 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
-import { ProductStatus } from '@prisma/client';
-import { IsBoolean, IsEnum, IsOptional } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ProductAvailability, ProductStatus } from '@prisma/client';
+import { IsEnum, IsOptional } from 'class-validator';
 
 export class UpdateProductStatusDto {
-  @ApiPropertyOptional({ enum: ProductStatus })
-  @IsOptional()
+  @ApiProperty({ enum: ProductStatus, example: ProductStatus.ACTIVE })
   @IsEnum(ProductStatus)
-  status?: ProductStatus;
+  readonly status!: ProductStatus;
 
-  @ApiPropertyOptional({ type: Boolean })
+  @ApiPropertyOptional({
+    enum: ProductAvailability,
+    example: ProductAvailability.IN_STOCK,
+  })
   @IsOptional()
-  @IsBoolean()
-  isActive?: boolean;
+  @IsEnum(ProductAvailability)
+  readonly availability?: ProductAvailability;
 }
-

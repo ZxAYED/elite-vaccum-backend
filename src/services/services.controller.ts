@@ -57,7 +57,11 @@ export class ServicesController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'status', required: false, enum: ['active', 'inactive'] })
   @ApiQuery({ name: 'categoryId', required: false, type: String })
-  @ApiQuery({ name: 'sortBy', required: false, enum: ['name', 'sortOrder', 'createdAt'] })
+  @ApiQuery({
+    name: 'sortBy',
+    required: false,
+    enum: ['name', 'sortOrder', 'createdAt'],
+  })
   @ApiQuery({ name: 'sortOrder', required: false, enum: ['asc', 'desc'] })
   findAllServices(
     @Query('page') page?: string,
@@ -196,7 +200,9 @@ export class ServicesController {
 
   @Post('service-quotations')
   @Roles('ADMIN', 'STAFF')
-  @ApiOperation({ summary: 'Create quotation for a service request (admin only)' })
+  @ApiOperation({
+    summary: 'Create quotation for a service request (admin only)',
+  })
   @ApiBody({ type: CreateServiceQuotationDto })
   createServiceQuotation(
     @Body() dto: CreateServiceQuotationDto,
@@ -226,7 +232,11 @@ export class ServicesController {
     @Body() dto: RejectServiceQuotationDto,
     @Req() req?: { user?: { id: string; role: string } },
   ) {
-    return this.serviceQuotationsService.rejectQuotation(id, dto.reason, req?.user);
+    return this.serviceQuotationsService.rejectQuotation(
+      id,
+      dto.reason,
+      req?.user,
+    );
   }
 
   @Post('service-schedules')
@@ -272,6 +282,10 @@ export class ServicesController {
     @Body() dto: RequestRescheduleDto,
     @Req() req?: { user?: { id: string; role: string } },
   ) {
-    return this.serviceSchedulesService.requestRescheduleByCustomer(id, dto, req?.user);
+    return this.serviceSchedulesService.requestRescheduleByCustomer(
+      id,
+      dto,
+      req?.user,
+    );
   }
 }

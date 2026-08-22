@@ -1,31 +1,51 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export class CreateCategoryDto {
-  @ApiProperty({ example: 'Central Vacuum Units' })
+  @ApiProperty({
+    example: 'Central Vacuum Units',
+    description: 'Category name',
+  })
   @IsString()
-  @MaxLength(120)
-  name!: string;
+  @IsNotEmpty()
+  @MaxLength(100)
+  readonly name!: string;
 
-  @ApiPropertyOptional({ example: 'central-vacuum-units' })
+  @ApiPropertyOptional({
+    example: 'central-vacuum-units',
+    description: 'Unique category slug. Auto-generated from name if omitted.',
+  })
   @IsOptional()
   @IsString()
-  slug?: string;
+  @MaxLength(100)
+  readonly slug?: string;
 
-  @ApiPropertyOptional({ example: 'parent-category-id' })
+  @ApiPropertyOptional({
+    example: 'Complete range of central vacuum power units',
+    description: 'Category description',
+  })
   @IsOptional()
-  @IsUUID()
-  parentId?: string;
+  @IsString()
+  readonly description?: string;
 
-  @ApiPropertyOptional({ default: true })
+  @ApiPropertyOptional({ example: 'ACTIVE', default: 'ACTIVE' })
   @IsOptional()
-  @IsBoolean()
-  isActive?: boolean;
+  @IsString()
+  @MaxLength(50)
+  readonly status?: string;
 
-  @ApiPropertyOptional({ default: 0 })
+  @ApiPropertyOptional({ example: 0, default: 0 })
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
-  sortOrder?: number;
+  readonly sortOrder?: number;
 }
-
