@@ -25,7 +25,7 @@ export class AiController {
   constructor(private readonly aiService: AiService) {}
 
   @Post('chat/stream')
-  @Roles(UserRole.ADMIN, UserRole.STAFF, UserRole.CUSTOMER, UserRole.TECHNICIAN)
+  @Roles(UserRole.ADMIN ,UserRole.CUSTOMER, UserRole.TECHNICIAN)
   @ApiOperation({ summary: 'Stream a Gemini response' })
   @ApiBody({ type: ChatDto })
   async streamChat(
