@@ -1,462 +1,577 @@
-﻿import {
+import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import {
+  CustomerStatus,
+  Prisma,
+  RequestUrgency,
+  ServiceCatalogStatus,
+  ServiceGroup,
+  ServiceRequestStatus,
+  UserRole,
+} from '@prisma/client';
+import { RequestUser } from 'src/common/decorator/currentUser.decorator';
+import { generateBusinessId } from 'src/common/utils/business-id.util';
+import { getPagination } from 'src/common/utils/pagination';
+import { PrismaService } from 'src/prisma/prisma.service';
+import { FIXED_SERVICES_CATALOG } from './constants/services-catalog.constant';
+import { AddServiceRequestAttachmentDto } from './dto/add-service-request-attachment.dto';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
-import { UpdateServiceRequestDto } from './dto/update-service-request.dto';
+import { RejectServiceRequestDto } from './dto/reject-service-request.dto';
 import { ServiceRequestListQueryDto } from './dto/service-request-list-query.dto';
-import { Role, ServiceRequestStatus } from '@prisma/client';
-import { getPagination } from '../common/utils/pagination';
-import { S3UploadService } from 'src/storage/s3-upload.service';
-import { NotificationsService } from 'src/notifications/notifications.service';
-import { AuditLogService } from 'src/notifications/audit-log.service';
-
-type Actor = { id: string; role: string };
+import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
 
 @Injectable()
 export class ServiceRequestsService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly s3UploadService: S3UploadService,
-    private readonly notificationsService: NotificationsService,
-    private readonly auditLogService: AuditLogService,
-  ) {}
+  private readonly logger = new Logger(ServiceRequestsService.name);
 
-  private isAdmin(actor?: Actor) {
-    return actor?.role === Role.ADMIN || actor?.role === Role.STAFF;
+  constructor(private readonly prisma: PrismaService) {}
+
+  private isAdmin(user?: RequestUser | null): boolean {
+    return user?.role === UserRole.ADMIN;
   }
 
-  private canTransition(from: ServiceRequestStatus, to: ServiceRequestStatus) {
-    const map: Record<ServiceRequestStatus, ServiceRequestStatus[]> = {
-      SUBMITTED: ['UNDER_REVIEW', 'QUOTED', 'CANCELLED'],
-      UNDER_REVIEW: ['QUOTED', 'CANCELLED', 'SUBMITTED'],
-      QUOTED: [
-        'QUOTATION_ACCEPTED',
-        'QUOTATION_REJECTED',
-        'UNDER_REVIEW',
-        'CANCELLED',
-      ],
-      QUOTATION_ACCEPTED: ['SCHEDULED', 'UNDER_REVIEW', 'CANCELLED'],
-      QUOTATION_REJECTED: ['UNDER_REVIEW', 'QUOTED', 'CANCELLED'],
-      SCHEDULED: ['IN_PROGRESS', 'CANCELLED', 'UNDER_REVIEW'],
-      IN_PROGRESS: ['COMPLETED', 'CANCELLED'],
-      COMPLETED: ['UNDER_REVIEW'],
-      CANCELLED: ['UNDER_REVIEW'],
-    };
-    return map[from]?.includes(to) ?? false;
+  private isUuid(id: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      id,
+    );
   }
 
-  private createRequestNumber() {
-    return `SR-${Date.now()}`;
+  private async generateRequestBusinessId(): Promise<string> {
+    return generateBusinessId('REQ', async (id) => {
+      const exists = await this.prisma.serviceRequest.findUnique({
+        where: { businessId: id },
+        select: { id: true },
+      });
+      return !!exists;
+    });
   }
 
-  private resolveMediaType(mimeType: string) {
-    if (mimeType.startsWith('image/')) return 'IMAGE' as const;
-    if (mimeType.startsWith('video/')) return 'VIDEO' as const;
-    if (mimeType.includes('pdf')) return 'PDF' as const;
-    return 'DOCUMENT' as const;
-  }
+  /**
+   * Resolves or provisions a Customer profile for an intake request.
+   */
+  private async resolveOrCreateCustomer(
+    dto: { fullName: string; email: string; phone: string; address?: string; city?: string; state?: string; zipCode?: string },
+    user?: RequestUser | null,
+  ): Promise<string> {
+    const email = dto.email.trim().toLowerCase();
 
-  async create(
-    dto: CreateServiceRequestDto,
-    actor?: Actor,
-    files?: Express.Multer.File[],
-  ) {
-    if (!actor || actor.role !== Role.CUSTOMER) {
-      throw new ForbiddenException('Only customer can submit service requests');
+    if (user && user.id) {
+      const existing = await this.prisma.customer.findUnique({
+        where: { userId: user.id },
+        select: { id: true },
+      });
+      if (existing) return existing.id;
     }
 
-    const serviceType = await this.prisma.serviceType.findUnique({
-      where: { id: dto.serviceId },
-      select: {
-        id: true,
-        serviceCategoryId: true,
-        isActive: true,
-        serviceCategory: { select: { isActive: true } },
-      },
+    const byEmail = await this.prisma.customer.findFirst({
+      where: { email },
+      select: { id: true },
+    });
+    if (byEmail) return byEmail.id;
+
+    // Check if a User exists with this email
+    const userRecord = await this.prisma.user.findUnique({
+      where: { email },
     });
 
-    if (
-      !serviceType ||
-      !serviceType.isActive ||
-      !serviceType.serviceCategory.isActive
-    ) {
-      throw new BadRequestException('Invalid service type');
-    }
+    const parts = dto.fullName.trim().split(' ');
+    const firstName = parts[0] || 'Customer';
+    const lastName = parts.slice(1).join(' ') || '';
 
-    const created = await this.prisma.serviceRequest.create({
+    const created = await this.prisma.customer.create({
       data: {
-        requestNumber: this.createRequestNumber(),
-        customerId: actor.id,
-        serviceCategoryId: serviceType.serviceCategoryId,
-        serviceTypeId: serviceType.id,
-        addressId: dto.addressId,
-        customerMachineId: dto.customerMachineId,
-        serviceLocationText: dto.serviceLocationText,
-        preferredDate: dto.preferredDate
-          ? new Date(dto.preferredDate)
-          : undefined,
-        preferredTime: dto.preferredTime,
-        problemDescription: dto.description ?? 'No description provided',
-        additionalNotes: dto.additionalNotes,
-        previousMachineInfo: dto.previousMachineInfo,
-        status: ServiceRequestStatus.SUBMITTED,
+        userId: userRecord?.id || null,
+        displayName: dto.fullName.trim(),
+        firstName,
+        lastName,
+        email,
+        phone: dto.phone.trim(),
+        status: userRecord ? CustomerStatus.ACTIVE : CustomerStatus.LEAD,
       },
-      select: {
-        id: true,
-        requestNumber: true,
-        status: true,
-        customer: { select: { id: true, email: true, fullName: true } },
-      },
+      select: { id: true },
     });
 
-    const uploadedFiles: {
-      id: string;
-      url: string;
-      type: string;
-      fileName: string | null;
-    }[] = [];
-
-    if (files && files.length > 0) {
-      for (const file of files) {
-        if (
-          !file.mimetype.startsWith('image/') &&
-          !file.mimetype.startsWith('video/') &&
-          !file.mimetype.startsWith('application/')
-        ) {
-          throw new BadRequestException(
-            `Unsupported file type: ${file.mimetype}`,
-          );
-        }
-
-        const uploaded = await this.s3UploadService.uploadFile({
-          fileBuffer: file.buffer,
-          originalName: file.originalname,
-          mimeType: file.mimetype,
-          folder: 'service-requests',
-        });
-
-        const media = await this.prisma.serviceRequestMedia.create({
-          data: {
-            serviceRequestId: created.id,
-            type: this.resolveMediaType(file.mimetype),
-            url: uploaded.url,
-            objectKey: uploaded.key,
-            fileName: file.originalname,
-            mimeType: file.mimetype,
-            size: file.size,
-          },
-          select: {
-            id: true,
-            url: true,
-            type: true,
-            fileName: true,
-          },
-        });
-
-        uploadedFiles.push(media);
-      }
-    }
-
-    await this.auditLogService.log({
-      actionType: 'CREATE_SERVICE_REQUEST',
-      entityType: 'SERVICE_REQUEST',
-      entityId: created.id,
-      userId: actor.id,
-      metadata: {
-        requestNumber: created.requestNumber,
-        filesUploaded: uploadedFiles.length,
-      },
-    });
-
-    await this.notificationsService.notify({
-      userId: created.customer.id,
-      email: created.customer.email,
-      title: 'Service request submitted',
-      body: `Your service request ${created.requestNumber} has been submitted.`,
-      referenceType: 'SERVICE_REQUEST',
-      referenceId: created.id,
-      emailSubject: 'Service request submitted',
-    });
-
-    return {
-      message: 'Service request submitted successfully',
-      requestId: created.id,
-      requestNumber: created.requestNumber,
-      status: created.status,
-      files: uploadedFiles,
-    };
+    return created.id;
   }
 
-  async findAll(query: ServiceRequestListQueryDto, actor?: Actor) {
-    if (!actor) {
-      throw new ForbiddenException('Unauthorized');
+  /**
+   * Resolves or auto-creates the Service record in database by slug.
+   */
+  private async resolveService(serviceSlug: string) {
+    const slug = serviceSlug.toLowerCase().trim();
+    const existing = await this.prisma.service.findUnique({
+      where: { slug },
+    });
+    if (existing) return existing;
+
+    const catalogItem = FIXED_SERVICES_CATALOG.find(
+      (s) => s.slug.toLowerCase() === slug,
+    );
+
+    const title = catalogItem ? catalogItem.title : serviceSlug;
+    const group = catalogItem ? catalogItem.group : ServiceGroup.SERVICE_AND_MAINTENANCE;
+    const desc = catalogItem ? catalogItem.description : 'Central vacuum service';
+
+    return this.prisma.service.create({
+      data: {
+        slug,
+        name: title,
+        category: group,
+        description: desc,
+        basePriceUsd: catalogItem?.basePriceUsd
+          ? new Prisma.Decimal(catalogItem.basePriceUsd)
+          : null,
+        status: ServiceCatalogStatus.ACTIVE,
+      },
+    });
+  }
+
+  private requestInclude() {
+    return {
+      customer: {
+        select: {
+          id: true,
+          userId: true,
+          displayName: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          phone: true,
+          status: true,
+        },
+      },
+      service: {
+        select: {
+          id: true,
+          slug: true,
+          name: true,
+          category: true,
+          basePriceUsd: true,
+        },
+      },
+      equipment: true,
+      attachments: {
+        orderBy: { uploadedAt: 'asc' },
+      },
+      rejectionHistory: {
+        orderBy: { rejectedAt: 'desc' },
+      },
+      appointments: {
+        include: {
+          technician: {
+            select: {
+              id: true,
+              displayName: true,
+              phone: true,
+              rating: true,
+            },
+          },
+        },
+        orderBy: { startAt: 'desc' },
+      },
+      serviceOrder: {
+        select: {
+          id: true,
+          businessId: true,
+          status: true,
+          scheduledAt: true,
+          totalUsd: true,
+        },
+      },
+      quotations: {
+        select: {
+          id: true,
+          businessId: true,
+          status: true,
+          totalUsd: true,
+          expiresAt: true,
+        },
+      },
+    } satisfies Prisma.ServiceRequestInclude;
+  }
+
+  // ==========================================
+  // INTAKE & CREATION
+  // ==========================================
+
+  async createRequest(
+    dto: CreateServiceRequestDto,
+    user?: RequestUser | null,
+  ) {
+    const customerId = await this.resolveOrCreateCustomer(dto, user);
+    const service = await this.resolveService(dto.serviceSlug);
+    const businessId = await this.generateRequestBusinessId();
+
+    const serviceAddressSnapshot = {
+      address: dto.address.trim(),
+      city: dto.city.trim(),
+      state: dto.state.trim(),
+      zipCode: dto.zipCode.trim(),
+      problemLocation: dto.problemLocation?.trim() || null,
+      contactName: dto.fullName.trim(),
+      contactPhone: dto.phone.trim(),
+      contactEmail: dto.email.trim(),
+    };
+
+    const requestedScheduleSnapshot = {
+      preferredDate: dto.preferredDate.trim(),
+      timeWindow: dto.timeWindow.trim(),
+      submittedAt: new Date().toISOString(),
+    };
+
+    const title = `${service.name} Request - ${dto.city}, ${dto.state}`;
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Create Service Request record
+      const request = await tx.serviceRequest.create({
+        data: {
+          businessId,
+          customerId,
+          serviceId: service.id,
+          title,
+          description: dto.problemDescription.trim(),
+          symptoms: dto.symptoms || [],
+          status: ServiceRequestStatus.SUBMITTED,
+          urgency: RequestUrgency.MEDIUM,
+          preferredDate: dto.preferredDate.trim(),
+          preferredTime: dto.timeWindow.trim(),
+          propertyLabel: `${dto.city}, ${dto.state}`.trim(),
+          serviceAddress: serviceAddressSnapshot,
+          requestedSchedule: requestedScheduleSnapshot,
+          currentSchedule: requestedScheduleSnapshot,
+          problemLocation: dto.problemLocation?.trim() || null,
+          additionalNotes: dto.additionalNotes?.trim() || null,
+        },
+      });
+
+      // 2. Create Equipment record if provided
+      if (
+        dto.manufacturer ||
+        dto.modelNumber ||
+        dto.serialNumber ||
+        dto.unitLocation
+      ) {
+        await tx.serviceRequestEquipment.create({
+          data: {
+            serviceRequestId: request.id,
+            manufacturer: dto.manufacturer?.trim() || null,
+            modelNumber: dto.modelNumber?.trim() || null,
+            serialNumber: dto.serialNumber?.trim() || null,
+            unitLocation: dto.unitLocation?.trim() || null,
+          },
+        });
+      }
+
+      // 3. Create Attachments if provided
+      if (dto.attachments && dto.attachments.length > 0) {
+        await tx.serviceRequestAttachment.createMany({
+          data: dto.attachments.map((att) => ({
+            serviceRequestId: request.id,
+            fileName: att.fileName.trim(),
+            fileType: att.fileType.trim(),
+            sizeBytes: att.sizeBytes,
+            url: att.url.trim(),
+            kind: att.kind,
+            category: att.category?.trim() || null,
+            note: att.note?.trim() || null,
+          })),
+        });
+      }
+
+      const fullRecord = await tx.serviceRequest.findUnique({
+        where: { id: request.id },
+        include: this.requestInclude(),
+      });
+
+      return {
+        success: true,
+        message: 'Service intake request submitted successfully',
+        businessId: request.businessId,
+        request: fullRecord,
+      };
+    });
+  }
+
+  // ==========================================
+  // REQUEST QUERIES
+  // ==========================================
+
+  async getMyRequests(
+    query: ServiceRequestListQueryDto,
+    user: RequestUser,
+  ) {
+    const customer = await this.prisma.customer.findUnique({
+      where: { userId: user.id },
+      select: { id: true },
+    });
+
+    if (!customer) {
+      return {
+        items: [],
+        meta: { page: query.page || 1, limit: query.limit || 10, total: 0, totalPages: 0 },
+      };
     }
 
-    const admin = this.isAdmin(actor);
-
-    const where = {
-      ...(admin ? {} : { customerId: actor.id }),
-      ...(admin && query.status ? { status: query.status } : {}),
-      ...(admin && query.customerId ? { customerId: query.customerId } : {}),
-      ...(admin && query.serviceCategoryId
-        ? { serviceCategoryId: query.serviceCategoryId }
+    const where: Prisma.ServiceRequestWhereInput = {
+      customerId: customer.id,
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.urgency ? { urgency: query.urgency } : {}),
+      ...(query.serviceSlug
+        ? { service: { slug: query.serviceSlug.toLowerCase().trim() } }
         : {}),
-      ...(admin && query.serviceTypeId
-        ? { serviceTypeId: query.serviceTypeId }
+      ...(query.search
+        ? {
+            OR: [
+              { businessId: { contains: query.search, mode: 'insensitive' } },
+              { title: { contains: query.search, mode: 'insensitive' } },
+              { description: { contains: query.search, mode: 'insensitive' } },
+            ],
+          }
         : {}),
     };
 
     const totalItems = await this.prisma.serviceRequest.count({ where });
-    const pagination = getPagination(query.page, query.limit, totalItems);
+    const { skip, take, meta } = getPagination(
+      query.page,
+      query.limit,
+      totalItems,
+    );
 
-    const data = await this.prisma.serviceRequest.findMany({
+    const sortBy = query.sortBy || 'submittedAt';
+    const sortOrder = query.sortOrder || 'desc';
+
+    const items = await this.prisma.serviceRequest.findMany({
       where,
-      skip: pagination.skip,
-      take: pagination.take,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        serviceCategory: { select: { id: true, name: true } },
-        serviceType: { select: { id: true, name: true } },
-        ...(admin
-          ? { customer: { select: { id: true, fullName: true, email: true } } }
-          : {}),
-      },
+      skip,
+      take,
+      orderBy: { [sortBy]: sortOrder },
+      include: this.requestInclude(),
     });
 
     return {
-      data,
-      meta: pagination.meta,
+      items,
+      meta,
     };
   }
 
-  async findOne(id: string, actor?: Actor) {
-    if (!actor) {
-      throw new ForbiddenException('Unauthorized');
-    }
-
-    const request = await this.prisma.serviceRequest.findUnique({
-      where: { id },
-      include: {
-        serviceCategory: true,
-        serviceType: true,
-        serviceAddress: true,
-        customerMachine: true,
-        media: true,
-        quotations: {
-          orderBy: { createdAt: 'desc' },
-        },
-        ...(this.isAdmin(actor)
-          ? {
-              customer: {
-                select: { id: true, fullName: true, email: true, phone: true },
+  async getAdminRequests(query: ServiceRequestListQueryDto) {
+    const where: Prisma.ServiceRequestWhereInput = {
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.urgency ? { urgency: query.urgency } : {}),
+      ...(query.serviceSlug
+        ? { service: { slug: query.serviceSlug.toLowerCase().trim() } }
+        : {}),
+      ...(query.search
+        ? {
+            OR: [
+              { businessId: { contains: query.search, mode: 'insensitive' } },
+              { title: { contains: query.search, mode: 'insensitive' } },
+              {
+                customer: {
+                  displayName: { contains: query.search, mode: 'insensitive' },
+                },
               },
-            }
-          : {}),
+              {
+                customer: {
+                  email: { contains: query.search, mode: 'insensitive' },
+                },
+              },
+              {
+                customer: {
+                  phone: { contains: query.search, mode: 'insensitive' },
+                },
+              },
+            ],
+          }
+        : {}),
+      ...(query.dateFrom || query.dateTo
+        ? {
+            submittedAt: {
+              ...(query.dateFrom ? { gte: new Date(query.dateFrom) } : {}),
+              ...(query.dateTo ? { lte: new Date(query.dateTo) } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const totalItems = await this.prisma.serviceRequest.count({ where });
+    const { skip, take, meta } = getPagination(
+      query.page,
+      query.limit,
+      totalItems,
+    );
+
+    const sortBy = query.sortBy || 'submittedAt';
+    const sortOrder = query.sortOrder || 'desc';
+
+    const [items, submittedCount, underReviewCount, acceptedCount, rejectedCount, scheduledCount] =
+      await Promise.all([
+        this.prisma.serviceRequest.findMany({
+          where,
+          skip,
+          take,
+          orderBy: { [sortBy]: sortOrder },
+          include: this.requestInclude(),
+        }),
+        this.prisma.serviceRequest.count({ where: { status: ServiceRequestStatus.SUBMITTED } }),
+        this.prisma.serviceRequest.count({ where: { status: ServiceRequestStatus.UNDER_REVIEW } }),
+        this.prisma.serviceRequest.count({ where: { status: ServiceRequestStatus.ACCEPTED } }),
+        this.prisma.serviceRequest.count({ where: { status: ServiceRequestStatus.REJECTED } }),
+        this.prisma.serviceRequest.count({ where: { status: ServiceRequestStatus.SCHEDULED } }),
+      ]);
+
+    return {
+      items,
+      meta: {
+        ...meta,
+        kpi: {
+          submitted: submittedCount,
+          underReview: underReviewCount,
+          accepted: acceptedCount,
+          rejected: rejectedCount,
+          scheduled: scheduledCount,
+          total: totalItems,
+        },
       },
+    };
+  }
+
+  async getRequestDetails(
+    idOrBusinessId: string,
+    user?: RequestUser | null,
+  ) {
+    const isUuid = this.isUuid(idOrBusinessId);
+
+    const request = await this.prisma.serviceRequest.findFirst({
+      where: isUuid
+        ? { id: idOrBusinessId }
+        : { businessId: idOrBusinessId },
+      include: this.requestInclude(),
     });
 
     if (!request) {
-      throw new NotFoundException('Service request not found');
+      throw new NotFoundException(`Service Request '${idOrBusinessId}' not found`);
     }
 
-    if (!this.isAdmin(actor) && request.customerId !== actor.id) {
-      throw new ForbiddenException('You can only view your own requests');
-    }
-
-    if (!this.isAdmin(actor)) {
-      const { adminInternalNote, ...safe } = request;
-      return safe;
+    if (!this.isAdmin(user)) {
+      if (!user || user.id !== request.customer.userId) {
+        throw new ForbiddenException('You do not have permission to view this service request');
+      }
     }
 
     return request;
   }
 
-  async update(id: string, dto: UpdateServiceRequestDto, actor?: Actor) {
-    if (!actor) {
-      throw new ForbiddenException('Unauthorized');
-    }
+  // ==========================================
+  // ADMIN STATUS TRANSITIONS & TRIAGE
+  // ==========================================
 
-    const existing = await this.prisma.serviceRequest.findUnique({
+  async updateStatus(
+    id: string,
+    dto: UpdateServiceRequestStatusDto,
+    user: RequestUser,
+  ) {
+    const request = await this.prisma.serviceRequest.findUnique({
       where: { id },
-      include: {
-        customer: { select: { id: true, email: true, fullName: true } },
-      },
     });
 
-    if (!existing) {
-      throw new NotFoundException('Service request not found');
-    }
-
-    const admin = this.isAdmin(actor);
-
-    if (!admin && existing.customerId !== actor.id) {
-      throw new ForbiddenException('You can only update your own request');
-    }
-
-    if (!admin && (dto.status || dto.adminInternalNote !== undefined)) {
-      throw new ForbiddenException(
-        'Customer cannot update status/internal notes',
-      );
-    }
-
-    let nextStatus = existing.status;
-    if (admin && dto.status) {
-      if (!this.canTransition(existing.status, dto.status)) {
-        throw new BadRequestException(
-          `Invalid status transition: ${existing.status} -> ${dto.status}`,
-        );
-      }
-      nextStatus = dto.status;
-    }
-
-    if (!admin) {
-      const customerEditedCoreDetails =
-        dto.problemDescription !== undefined ||
-        dto.additionalNotes !== undefined ||
-        dto.previousMachineInfo !== undefined;
-
-      // Reopen/rescope flow when customer adds details after quotation stage.
-      const reopenableStatuses: ServiceRequestStatus[] = [
-        ServiceRequestStatus.QUOTED,
-        ServiceRequestStatus.QUOTATION_ACCEPTED,
-        ServiceRequestStatus.QUOTATION_REJECTED,
-        ServiceRequestStatus.SCHEDULED,
-      ];
-
-      if (
-        customerEditedCoreDetails &&
-        reopenableStatuses.includes(existing.status)
-      ) {
-        nextStatus = ServiceRequestStatus.UNDER_REVIEW;
-      }
+    if (!request) {
+      throw new NotFoundException(`Service Request with ID '${id}' not found`);
     }
 
     const updated = await this.prisma.serviceRequest.update({
       where: { id },
       data: {
-        ...(nextStatus !== existing.status ? { status: nextStatus } : {}),
-        ...(admin && dto.adminInternalNote !== undefined
-          ? { adminInternalNote: dto.adminInternalNote }
-          : {}),
-        ...(dto.problemDescription !== undefined
-          ? { problemDescription: dto.problemDescription }
-          : {}),
-        ...(dto.additionalNotes !== undefined
-          ? { additionalNotes: dto.additionalNotes }
-          : {}),
-        ...(dto.previousMachineInfo !== undefined
-          ? { previousMachineInfo: dto.previousMachineInfo }
-          : {}),
-        ...(dto.preferredDate
-          ? { preferredDate: new Date(dto.preferredDate) }
-          : {}),
-        ...(dto.preferredTime !== undefined
-          ? { preferredTime: dto.preferredTime }
-          : {}),
+        status: dto.status,
       },
+      include: this.requestInclude(),
     });
 
-    if (admin && dto.status) {
-      await this.notificationsService.notify({
-        userId: existing.customer.id,
-        email: existing.customer.email,
-        title: `Service request status updated`,
-        body: `Your service request ${existing.requestNumber} status is now ${nextStatus}.`,
-        referenceType: 'SERVICE_REQUEST',
-        referenceId: existing.id,
-      });
-    }
+    this.logger.log(
+      `Service Request '${request.businessId}' status updated to '${dto.status}' by ${user.email}`,
+    );
 
-    if (!admin && nextStatus === ServiceRequestStatus.UNDER_REVIEW) {
-      const admins = await this.prisma.user.findMany({
-        where: {
-          role: { in: [Role.ADMIN, Role.STAFF] },
-          isDeleted: false,
-        },
-        select: { id: true, email: true },
-      });
-      for (const adminUser of admins) {
-        await this.notificationsService.notify({
-          userId: adminUser.id,
-          email: adminUser.email,
-          title: 'Service request reopened',
-          body: `Customer updated request ${existing.requestNumber}. Review/rescope may be required.`,
-          referenceType: 'SERVICE_REQUEST',
-          referenceId: existing.id,
-        });
-      }
-    }
-
-    await this.auditLogService.log({
-      actionType: 'UPDATE_SERVICE_REQUEST',
-      entityType: 'SERVICE_REQUEST',
-      entityId: existing.id,
-      userId: actor.id,
-      metadata: { fromStatus: existing.status, toStatus: nextStatus },
-    });
-
-    return updated;
+    return {
+      success: true,
+      message: `Service request status updated to '${dto.status}'`,
+      request: updated,
+    };
   }
 
-  async cancel(id: string, actor?: Actor) {
-    if (!actor || actor.role !== Role.CUSTOMER) {
-      throw new ForbiddenException('Only customer can cancel own requests');
-    }
-
+  async rejectRequest(
+    id: string,
+    dto: RejectServiceRequestDto,
+    user: RequestUser,
+  ) {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id },
-      include: { customer: { select: { id: true, email: true } } },
     });
 
     if (!request) {
-      throw new NotFoundException('Service request not found');
+      throw new NotFoundException(`Service Request with ID '${id}' not found`);
     }
 
-    if (request.customerId !== actor.id) {
-      throw new ForbiddenException('You can only cancel your own requests');
+    if (request.status === ServiceRequestStatus.REJECTED) {
+      throw new BadRequestException('Service request is already marked as REJECTED');
     }
 
-    const cancellableStatuses: ServiceRequestStatus[] = [
-      ServiceRequestStatus.SUBMITTED,
-      ServiceRequestStatus.UNDER_REVIEW,
-      ServiceRequestStatus.QUOTED,
-      ServiceRequestStatus.QUOTATION_REJECTED,
-    ];
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.serviceRequest.update({
+        where: { id },
+        data: { status: ServiceRequestStatus.REJECTED },
+      });
 
-    if (!cancellableStatuses.includes(request.status)) {
-      throw new BadRequestException(
-        'Request cannot be cancelled at this stage',
-      );
+      await tx.serviceRequestRejection.create({
+        data: {
+          serviceRequestId: id,
+          reason: dto.reason.trim(),
+          comments: dto.comments?.trim() || null,
+          actorLabel: `Admin (${user.email})`,
+        },
+      });
+
+      const fullRecord = await tx.serviceRequest.findUnique({
+        where: { id },
+        include: this.requestInclude(),
+      });
+
+      return {
+        success: true,
+        message: 'Service request rejected and audit note recorded',
+        request: fullRecord,
+      };
+    });
+  }
+
+  async addAttachments(
+    id: string,
+    dto: AddServiceRequestAttachmentDto,
+    user?: RequestUser | null,
+  ) {
+    const request = await this.getRequestDetails(id, user);
+
+    if (dto.attachments.length === 0) {
+      throw new BadRequestException('No attachments provided');
     }
 
-    await this.prisma.serviceRequest.update({
-      where: { id },
-      data: {
-        status: ServiceRequestStatus.CANCELLED,
-        cancelledAt: new Date(),
-      },
+    await this.prisma.serviceRequestAttachment.createMany({
+      data: dto.attachments.map((att) => ({
+        serviceRequestId: request.id,
+        fileName: att.fileName.trim(),
+        fileType: att.fileType.trim(),
+        sizeBytes: att.sizeBytes,
+        url: att.url.trim(),
+        kind: att.kind,
+        category: att.category?.trim() || null,
+        note: att.note?.trim() || null,
+      })),
     });
 
-    await this.auditLogService.log({
-      actionType: 'CANCEL_SERVICE_REQUEST',
-      entityType: 'SERVICE_REQUEST',
-      entityId: request.id,
-      userId: actor.id,
-    });
-
-    await this.notificationsService.notify({
-      userId: request.customer.id,
-      email: request.customer.email,
-      title: 'Service request cancelled',
-      body: `Your service request ${request.requestNumber} has been cancelled.`,
-      referenceType: 'SERVICE_REQUEST',
-      referenceId: request.id,
-    });
-
-    return { message: 'Service request cancelled successfully' };
+    return this.getRequestDetails(id, user);
   }
 }

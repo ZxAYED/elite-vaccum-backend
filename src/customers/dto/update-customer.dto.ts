@@ -1,17 +1,11 @@
-import { PartialType } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsOptional } from 'class-validator';
-import { UserStatus } from '@prisma/client';
+import { ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import { CustomerStatus } from '@prisma/client';
+import { IsEnum, IsOptional } from 'class-validator';
 import { CreateCustomerDto } from './create-customer.dto';
-import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateCustomerDto extends PartialType(CreateCustomerDto) {
-  @ApiPropertyOptional({ enum: UserStatus })
+  @ApiPropertyOptional({ enum: CustomerStatus })
   @IsOptional()
-  @IsEnum(UserStatus)
-  status?: UserStatus;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsBoolean()
-  isDeleted?: boolean;
+  @IsEnum(CustomerStatus)
+  status?: CustomerStatus;
 }

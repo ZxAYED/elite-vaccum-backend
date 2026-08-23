@@ -54,6 +54,7 @@ model ServiceRequest {
   description          String               @db.Text
   status               ServiceRequestStatus @default(SUBMITTED)
   urgency              RequestUrgency       @default(MEDIUM)
+  symptoms             RequestSymptom[]     @default([])
   preferredDate        String               @map("preferred_date") @db.VarChar(50)
   preferredTime        String               @map("preferred_time") @db.VarChar(50)
   propertyLabel        String               @map("property_label") @db.VarChar(100)

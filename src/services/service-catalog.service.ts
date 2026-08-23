@@ -1,222 +1,185 @@
 import {
-  BadRequestException,
-  ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { CreateServiceDto } from './dto/create-service.dto';
-import { UpdateServiceDto } from './dto/update-service.dto';
-import { Role, ServiceRequestStatus } from '@prisma/client';
-import { getPagination } from '../common/utils/pagination';
-
-type Actor = { id: string; role: string };
+import { Prisma, ServiceCatalogStatus, ServiceGroup } from '@prisma/client';
+import { PrismaService } from 'src/prisma/prisma.service';
+import {
+  FIXED_SERVICES_CATALOG,
+  FixedServiceOffering,
+  SYMPTOM_DEFINITIONS,
+} from './constants/services-catalog.constant';
 
 @Injectable()
-export class ServiceCatalogService {
+export class ServiceCatalogService implements OnModuleInit {
+  private readonly logger = new Logger(ServiceCatalogService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
-  private isAdmin(actor?: Actor) {
-    return actor?.role === Role.ADMIN || actor?.role === Role.STAFF;
+  async onModuleInit() {
+    // Auto-seed or synchronize database catalog on startup
+    await this.ensureCatalogSeeded().catch((err) => {
+      this.logger.warn(`Failed to auto-seed services catalog: ${err.message}`);
+    });
   }
 
-  private slugify(text: string) {
-    return text
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9\s-]/g, '')
-      .replace(/\s+/g, '-')
-      .replace(/-+/g, '-');
-  }
+  /**
+   * Returns all 10 fixed services grouped by category along with symptom choices.
+   */
+  async getCatalogGrouped() {
+    // Fetch live DB catalog if available, with fallback to constant
+    let dbServices: any[] = [];
+    try {
+      dbServices = await this.prisma.service.findMany({
+        where: { status: ServiceCatalogStatus.ACTIVE },
+        include: { publicOfferings: true },
+        orderBy: { createdAt: 'asc' },
+      });
+    } catch {
+      // Fallback
+    }
 
-  async findAll(params: {
-    actor?: Actor;
-    page?: number;
-    limit?: number;
-    status?: 'active' | 'inactive';
-    categoryId?: string;
-    sortBy?: 'name' | 'sortOrder' | 'createdAt';
-    sortOrder?: 'asc' | 'desc';
-  }) {
-    const isAdmin = this.isAdmin(params.actor);
+    const serviceAndMaintenance = FIXED_SERVICES_CATALOG.filter(
+      (s) => s.group === ServiceGroup.SERVICE_AND_MAINTENANCE,
+    ).map((s) => this.enrichOffering(s, dbServices));
 
-    const where = {
-      ...(isAdmin
-        ? {
-            ...(params.status === 'active' ? { isActive: true } : {}),
-            ...(params.status === 'inactive' ? { isActive: false } : {}),
-          }
-        : { isActive: true }),
-      ...(params.categoryId ? { serviceCategoryId: params.categoryId } : {}),
-    };
+    const installation = FIXED_SERVICES_CATALOG.filter(
+      (s) => s.group === ServiceGroup.INSTALLATION,
+    ).map((s) => this.enrichOffering(s, dbServices));
 
-    const totalItems = await this.prisma.serviceType.count({ where });
-    const pagination = getPagination(params.page, params.limit, totalItems);
-
-    const data = await this.prisma.serviceType.findMany({
-      where,
-      include: {
-        serviceCategory: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-            description: true,
-            isActive: true,
+    return {
+      success: true,
+      data: {
+        serviceAndMaintenance,
+        installation,
+        symptoms: SYMPTOM_DEFINITIONS,
+      },
+      meta: {
+        totalServices: FIXED_SERVICES_CATALOG.length,
+        groups: [
+          {
+            key: ServiceGroup.SERVICE_AND_MAINTENANCE,
+            title: 'Service & Maintenance',
+            count: serviceAndMaintenance.length,
           },
-        },
+          {
+            key: ServiceGroup.INSTALLATION,
+            title: 'Installation Services',
+            count: installation.length,
+          },
+        ],
       },
-      skip: pagination.skip,
-      take: pagination.take,
-      orderBy: {
-        [params.sortBy ?? 'createdAt']: isAdmin
-          ? (params.sortOrder ?? 'desc')
-          : 'desc',
-      },
-    });
-
-    if (!isAdmin) {
-      return {
-        data: data.map((item) => ({
-          id: item.id,
-          name: item.name,
-          slug: item.slug,
-          description: item.description,
-          category: item.serviceCategory,
-        })),
-        meta: pagination.meta,
-      };
-    }
-
-    return { data, meta: pagination.meta };
+    };
   }
 
-  async findOne(id: string, actor?: Actor) {
-    const service = await this.prisma.serviceType.findUnique({
-      where: { id },
-      include: { serviceCategory: true },
-    });
+  /**
+   * Retrieves specific service metadata by slug.
+   */
+  async getServiceBySlug(slug: string) {
+    const fixed = FIXED_SERVICES_CATALOG.find(
+      (s) => s.slug.toLowerCase() === slug.toLowerCase().trim(),
+    );
 
-    if (!service) {
-      throw new NotFoundException('Service not found');
+    if (!fixed) {
+      throw new NotFoundException(`Service offering with slug '${slug}' not found`);
     }
 
-    if (!this.isAdmin(actor)) {
-      if (!service.isActive || !service.serviceCategory.isActive) {
-        throw new NotFoundException('Service not found');
+    const dbRecord = await this.prisma.service
+      .findUnique({
+        where: { slug: fixed.slug },
+        include: { publicOfferings: true },
+      })
+      .catch(() => null);
+
+    return {
+      success: true,
+      data: {
+        ...this.enrichOffering(fixed, dbRecord ? [dbRecord] : []),
+        symptoms: SYMPTOM_DEFINITIONS,
+      },
+    };
+  }
+
+  /**
+   * Ensures all 10 fixed services are mirrored into Prisma database tables.
+   */
+  async ensureCatalogSeeded() {
+    for (const offering of FIXED_SERVICES_CATALOG) {
+      try {
+        const service = await this.prisma.service.upsert({
+          where: { slug: offering.slug },
+          create: {
+            slug: offering.slug,
+            name: offering.title,
+            category: offering.group,
+            description: offering.description,
+            basePriceUsd: offering.basePriceUsd
+              ? new Prisma.Decimal(offering.basePriceUsd)
+              : null,
+            status: ServiceCatalogStatus.ACTIVE,
+          },
+          update: {
+            name: offering.title,
+            category: offering.group,
+            description: offering.description,
+            basePriceUsd: offering.basePriceUsd
+              ? new Prisma.Decimal(offering.basePriceUsd)
+              : null,
+            status: ServiceCatalogStatus.ACTIVE,
+          },
+        });
+
+        await this.prisma.publicServiceOffering.upsert({
+          where: { slug: offering.slug },
+          create: {
+            serviceId: service.id,
+            slug: offering.slug,
+            group: offering.group,
+            title: offering.title,
+            summary: offering.summary,
+            description: offering.description,
+            iconKey: offering.iconKey,
+            sortOrder: offering.sortOrder,
+            status: 'ACTIVE',
+          },
+          update: {
+            group: offering.group,
+            title: offering.title,
+            summary: offering.summary,
+            description: offering.description,
+            iconKey: offering.iconKey,
+            sortOrder: offering.sortOrder,
+          },
+        });
+      } catch (err: any) {
+        this.logger.debug(`Seeding note for '${offering.slug}': ${err.message}`);
       }
-      return {
-        id: service.id,
-        name: service.name,
-        slug: service.slug,
-        description: service.description,
-        category: {
-          id: service.serviceCategory.id,
-          name: service.serviceCategory.name,
-          slug: service.serviceCategory.slug,
-          description: service.serviceCategory.description,
-        },
-      };
     }
-
-    return service;
   }
 
-  async create(dto: CreateServiceDto, actor?: Actor) {
-    if (!this.isAdmin(actor)) {
-      throw new ForbiddenException('Only admin can create services');
-    }
+  private enrichOffering(
+    fixed: FixedServiceOffering,
+    dbServices: any[],
+  ) {
+    const matchedDb = dbServices.find(
+      (d) => d.slug.toLowerCase() === fixed.slug.toLowerCase(),
+    );
 
-    const category = await this.prisma.serviceCategory.findUnique({
-      where: { id: dto.serviceCategoryId },
-      select: { id: true, isActive: true },
-    });
-
-    if (!category) {
-      throw new BadRequestException('Invalid service category');
-    }
-
-    const slug = dto.slug ? this.slugify(dto.slug) : this.slugify(dto.name);
-
-    return this.prisma.serviceType.create({
-      data: {
-        serviceCategoryId: dto.serviceCategoryId,
-        name: dto.name.trim(),
-        slug,
-        description: dto.description,
-        isActive: dto.isActive ?? true,
-        sortOrder: dto.sortOrder ?? 0,
-      },
-      include: { serviceCategory: true },
-    });
-  }
-
-  async update(id: string, dto: UpdateServiceDto, actor?: Actor) {
-    if (!this.isAdmin(actor)) {
-      throw new ForbiddenException('Only admin can update services');
-    }
-
-    const existing = await this.prisma.serviceType.findUnique({
-      where: { id },
-    });
-    if (!existing) {
-      throw new NotFoundException('Service not found');
-    }
-
-    return this.prisma.serviceType.update({
-      where: { id },
-      data: {
-        ...(dto.serviceCategoryId
-          ? { serviceCategoryId: dto.serviceCategoryId }
-          : {}),
-        ...(dto.name ? { name: dto.name.trim() } : {}),
-        ...(dto.slug ? { slug: this.slugify(dto.slug) } : {}),
-        ...(dto.description !== undefined
-          ? { description: dto.description }
-          : {}),
-        ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
-        ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
-      },
-      include: { serviceCategory: true },
-    });
-  }
-
-  async remove(id: string, actor?: Actor) {
-    if (!this.isAdmin(actor)) {
-      throw new ForbiddenException('Only admin can delete services');
-    }
-
-    const existing = await this.prisma.serviceType.findUnique({
-      where: { id },
-    });
-    if (!existing) {
-      throw new NotFoundException('Service not found');
-    }
-
-    const activeLinkedRequests = await this.prisma.serviceRequest.count({
-      where: {
-        serviceTypeId: id,
-        status: {
-          in: [
-            ServiceRequestStatus.SUBMITTED,
-            ServiceRequestStatus.UNDER_REVIEW,
-            ServiceRequestStatus.QUOTED,
-            ServiceRequestStatus.QUOTATION_ACCEPTED,
-            ServiceRequestStatus.SCHEDULED,
-            ServiceRequestStatus.IN_PROGRESS,
-          ],
-        },
-      },
-    });
-
-    if (activeLinkedRequests > 0) {
-      throw new BadRequestException(
-        'Service cannot be deleted while active requests exist',
-      );
-    }
-
-    await this.prisma.serviceType.delete({ where: { id } });
-
-    return { message: 'Service deleted successfully' };
+    return {
+      id: matchedDb?.id || fixed.slug,
+      key: fixed.key,
+      slug: fixed.slug,
+      group: fixed.group,
+      title: fixed.title,
+      iconKey: fixed.iconKey,
+      summary: fixed.summary,
+      description: fixed.description,
+      sortOrder: fixed.sortOrder,
+      basePriceUsd: fixed.basePriceUsd ? fixed.basePriceUsd.toFixed(2) : null,
+      recommendedSymptoms: fixed.recommendedSymptoms,
+      status: 'ACTIVE',
+    };
   }
 }

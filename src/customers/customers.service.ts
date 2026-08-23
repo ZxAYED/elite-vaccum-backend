@@ -3,40 +3,39 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Role, UserStatus } from '@prisma/client';
+import { CustomerStatus, Prisma, UserRole } from '@prisma/client';
 import { getPagination } from '../common/utils/pagination';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 
 type Actor = {
   id: string;
-  role: Role | string;
+  role: UserRole | string;
 };
 
 @Injectable()
 export class CustomersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private isAdminRole(role: string) {
-    return role === Role.ADMIN || role === Role.STAFF;
+  private isAdminRole(role?: string) {
+    return role === UserRole.ADMIN || role === 'ADMIN';
   }
 
   private async findCustomerOrThrow(id: string, actor?: Actor) {
-    const customer = await this.prisma.user.findFirst({
+    const customer = await this.prisma.customer.findFirst({
       where: {
-        id,
-        role: Role.CUSTOMER,
+        OR: [{ id }, { userId: id }],
       },
       include: {
         addresses: {
           orderBy: { createdAt: 'desc' },
         },
-        storeOrders: {
+        productOrders: {
           select: {
             id: true,
-            orderNumber: true,
+            businessId: true,
             status: true,
-            totalAmount: true,
+            totalUsd: true,
             placedAt: true,
           },
           orderBy: { placedAt: 'desc' },
@@ -44,11 +43,12 @@ export class CustomersService {
         serviceRequests: {
           select: {
             id: true,
-            requestNumber: true,
+            businessId: true,
             status: true,
-            createdAt: true,
+            title: true,
+            submittedAt: true,
           },
-          orderBy: { createdAt: 'desc' },
+          orderBy: { submittedAt: 'desc' },
         },
       },
     });
@@ -60,8 +60,8 @@ export class CustomersService {
     if (
       actor &&
       !this.isAdminRole(actor.role) &&
-      actor.role === Role.CUSTOMER &&
-      actor.id !== customer.id
+      actor.id !== customer.id &&
+      actor.id !== customer.userId
     ) {
       throw new ForbiddenException(
         'You can only access your own customer profile',
@@ -79,8 +79,7 @@ export class CustomersService {
     phone?: string;
     cellphone?: string;
     fullName?: string;
-    status?: UserStatus;
-    isDeleted?: boolean;
+    status?: CustomerStatus;
   }) {
     const {
       page,
@@ -91,25 +90,22 @@ export class CustomersService {
       cellphone,
       fullName,
       status,
-      isDeleted,
     } = params;
 
-    const where: Prisma.UserWhereInput = {
-      role: Role.CUSTOMER,
+    const where: Prisma.CustomerWhereInput = {
       ...(email ? { email: { contains: email, mode: 'insensitive' } } : {}),
       ...(phone ? { phone: { contains: phone, mode: 'insensitive' } } : {}),
       ...(cellphone
         ? { cellphone: { contains: cellphone, mode: 'insensitive' } }
         : {}),
       ...(fullName
-        ? { fullName: { contains: fullName, mode: 'insensitive' } }
+        ? { displayName: { contains: fullName, mode: 'insensitive' } }
         : {}),
       ...(status ? { status } : {}),
-      ...(isDeleted !== undefined ? { isDeleted } : {}),
       ...(search
         ? {
             OR: [
-              { fullName: { contains: search, mode: 'insensitive' } },
+              { displayName: { contains: search, mode: 'insensitive' } },
               { email: { contains: search, mode: 'insensitive' } },
               { phone: { contains: search, mode: 'insensitive' } },
               { cellphone: { contains: search, mode: 'insensitive' } },
@@ -118,42 +114,33 @@ export class CustomersService {
         : {}),
     };
 
-    const totalItems = await this.prisma.user.count({ where });
+    const totalItems = await this.prisma.customer.count({ where });
     const pagination = getPagination(page, limit, totalItems);
 
-    const data = await this.prisma.user.findMany({
+    const data = await this.prisma.customer.findMany({
       where,
       skip: pagination.skip,
       take: pagination.take,
-      select: {
-        id: true,
-        fullName: true,
-        email: true,
-        phone: true,
-        cellphone: true,
-        companyName: true,
-        status: true,
-        isDeleted: true,
-        createdAt: true,
+      include: {
         _count: {
           select: {
-            storeOrders: true,
+            productOrders: true,
             serviceRequests: true,
           },
         },
-        storeOrders: {
-          select: { totalAmount: true },
+        productOrders: {
+          select: { totalUsd: true },
         },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { joinedAt: 'desc' },
     });
 
     const enrichedData = data.map((customer) => {
-      const totalSpent = customer.storeOrders.reduce(
-        (sum, order) => sum + Number(order.totalAmount),
+      const totalSpent = customer.productOrders.reduce(
+        (sum, order) => sum + Number(order.totalUsd),
         0,
       );
-      const { storeOrders, ...rest } = customer;
+      const { productOrders, ...rest } = customer;
       return { ...rest, totalSpent };
     });
 
@@ -166,8 +153,8 @@ export class CustomersService {
   async findOne(id: string, actor?: Actor) {
     const customer = await this.findCustomerOrThrow(id, actor);
 
-    const totalSpent = customer.storeOrders.reduce(
-      (sum, order) => sum + Number(order.totalAmount),
+    const totalSpent = customer.productOrders.reduce(
+      (sum, order) => sum + Number(order.totalUsd),
       0,
     );
 
@@ -184,30 +171,34 @@ export class CustomersService {
   ) {
     const existing = await this.findCustomerOrThrow(id, actor);
 
-    return this.prisma.user.update({
-      where: { id },
+    const parts = updateCustomerDto.name?.trim().split(' ') || [];
+    const firstName = parts[0];
+    const lastName = parts.slice(1).join(' ');
+
+    return this.prisma.customer.update({
+      where: { id: existing.id },
       data: {
         ...(updateCustomerDto.name
-          ? { fullName: updateCustomerDto.name.trim() }
+          ? {
+              displayName: updateCustomerDto.name.trim(),
+              ...(firstName ? { firstName } : {}),
+              ...(lastName !== undefined ? { lastName } : {}),
+            }
           : {}),
         ...(updateCustomerDto.email
           ? { email: updateCustomerDto.email.trim().toLowerCase() }
           : {}),
         ...(updateCustomerDto.phone !== undefined
-          ? { phone: updateCustomerDto.phone?.trim() || null }
+          ? { phone: updateCustomerDto.phone?.trim() || '' }
           : {}),
         ...(updateCustomerDto.cellphone !== undefined
           ? { cellphone: updateCustomerDto.cellphone?.trim() || null }
           : {}),
         ...(updateCustomerDto.companyName !== undefined
-          ? { companyName: updateCustomerDto.companyName?.trim() || null }
+          ? { company: updateCustomerDto.companyName?.trim() || null }
           : {}),
-        ...(this.isAdminRole(actor?.role ?? '') && updateCustomerDto.status
+        ...(this.isAdminRole(actor?.role) && updateCustomerDto.status
           ? { status: updateCustomerDto.status }
-          : {}),
-        ...(this.isAdminRole(actor?.role ?? '') &&
-        updateCustomerDto.isDeleted !== undefined
-          ? { isDeleted: updateCustomerDto.isDeleted }
           : {}),
       },
       include: {

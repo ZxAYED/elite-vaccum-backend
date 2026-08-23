@@ -1,5 +1,6 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { CustomerStatus } from '@prisma/client';
 import {
-  IsBoolean,
   IsEmail,
   IsEnum,
   IsNotEmpty,
@@ -7,8 +8,6 @@ import {
   IsString,
   MaxLength,
 } from 'class-validator';
-import { UserStatus } from '@prisma/client';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateCustomerDto {
   @ApiProperty({ example: 'John Customer' })
@@ -40,19 +39,8 @@ export class CreateCustomerDto {
   @MaxLength(120)
   companyName?: string;
 
-  @ApiPropertyOptional({ example: '123 Main St' })
-  @IsString()
+  @ApiPropertyOptional({ enum: CustomerStatus, default: CustomerStatus.ACTIVE })
   @IsOptional()
-  @MaxLength(255)
-  address?: string;
-
-  @ApiPropertyOptional({ enum: UserStatus })
-  @IsOptional()
-  @IsEnum(UserStatus)
-  status?: UserStatus;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsBoolean()
-  isDeleted?: boolean;
+  @IsEnum(CustomerStatus)
+  status?: CustomerStatus = CustomerStatus.ACTIVE;
 }

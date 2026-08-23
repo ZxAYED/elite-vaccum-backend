@@ -64,7 +64,7 @@ export class AiController {
   }
 
   @Post('chat')
-  @Roles(UserRole.ADMIN, UserRole.STAFF, UserRole.CUSTOMER, UserRole.TECHNICIAN)
+  @Roles(UserRole.ADMIN, UserRole.CUSTOMER, UserRole.TECHNICIAN)
   @ApiOperation({ summary: 'Send a chat prompt to the configured AI provider' })
   @ApiBody({ type: ChatDto })
   @ApiOkResponse({
@@ -81,7 +81,7 @@ export class AiController {
   }
 
   @Post('service-intake')
-  @Roles(UserRole.CUSTOMER, UserRole.ADMIN, UserRole.STAFF)
+  @Roles(UserRole.CUSTOMER, UserRole.ADMIN)
   @ApiOperation({
     summary: 'Analyze a customer service problem',
   })

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { NotificationChannel, NotificationStatus } from '@prisma/client';
+import { NotificationType } from '@prisma/client';
 import { EmailService } from 'src/email/email.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 
@@ -15,6 +15,7 @@ export class NotificationsService {
     email?: string;
     title: string;
     body: string;
+    type?: NotificationType;
     referenceType?: string;
     referenceId?: string;
     emailSubject?: string;
@@ -22,36 +23,22 @@ export class NotificationsService {
     await this.prisma.notification.create({
       data: {
         userId: params.userId,
+        type: params.type || NotificationType.SYSTEM_ALERT,
         title: params.title,
-        body: params.body,
-        channel: NotificationChannel.IN_APP,
-        status: NotificationStatus.SENT,
-        sentAt: new Date(),
-        referenceType: params.referenceType,
-        referenceId: params.referenceId,
+        message: params.body,
+        isRead: false,
+        metadata: {
+          referenceType: params.referenceType,
+          referenceId: params.referenceId,
+        },
       },
     });
 
     if (params.email) {
-      const result = await this.emailService.sendAccountEmail({
+      await this.emailService.sendAccountEmail({
         to: params.email,
         subject: params.emailSubject ?? params.title,
         message: params.body,
-      });
-
-      await this.prisma.notification.create({
-        data: {
-          userId: params.userId,
-          title: params.title,
-          body: params.body,
-          channel: NotificationChannel.EMAIL,
-          status: result.success
-            ? NotificationStatus.SENT
-            : NotificationStatus.FAILED,
-          sentAt: result.success ? new Date() : undefined,
-          referenceType: params.referenceType,
-          referenceId: params.referenceId,
-        },
       });
     }
   }

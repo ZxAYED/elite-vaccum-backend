@@ -55,19 +55,20 @@ model ServiceOrderStatusHistory {
 model Appointment {
   id               String   @id @default(uuid()) @db.Uuid
   serviceOrderId   String?  @map("service_order_id") @db.Uuid
-  serviceRequestId String   @map("service_request_id") @db.Uuid
+  serviceRequestId String?  @map("service_request_id") @db.Uuid
   technicianId     String?  @map("technician_id") @db.Uuid
   status           String   @default("CONFIRMED") @db.VarChar(50)
   startAt          DateTime @map("start_at") @db.Timestamptz
   endAt            DateTime @map("end_at") @db.Timestamptz
   addressSnapshot  Json     @map("address_snapshot")
   notes            String?  @db.Text
+  adminNote        String?  @map("admin_note") @db.Text
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  serviceOrder   ServiceOrder?  @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
-  serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
-  technician     Technician?    @relation(fields: [technicianId], references: [id], onDelete: SetNull)
+  serviceOrder   ServiceOrder?   @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  serviceRequest ServiceRequest? @relation(fields: [serviceRequestId], references: [id], onDelete: SetNull)
+  technician     Technician?     @relation(fields: [technicianId], references: [id], onDelete: SetNull)
 
   @@index([technicianId, startAt])
   @@map("appointments")

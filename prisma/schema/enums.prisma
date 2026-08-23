@@ -8,6 +8,11 @@ enum UserRole {
   ADMIN
 }
 
+enum OtpPurpose {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
 enum CustomerStatus {
   ACTIVE
   INACTIVE
@@ -81,6 +86,17 @@ enum RequestUrgency {
   MEDIUM
   HIGH
   EMERGENCY
+}
+
+enum RequestSymptom {
+  UNIT_NOT_TURNING_ON
+  UNIT_DOES_NOT_SHUT_OFF
+  CLOGGED
+  LOW_SUCTION
+  WALL_OR_POWER_HOSE_PROBLEM
+  BROKEN_INLET
+  NOISE
+  OTHER
 }
 
 enum AttachmentKind {

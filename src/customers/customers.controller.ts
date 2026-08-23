@@ -2,17 +2,22 @@ import {
   Body,
   Controller,
   Get,
-  Patch,
   Param,
+  Patch,
   Query,
   Req,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
-import { UserStatus } from '@prisma/client';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
+import { CustomerStatus } from '@prisma/client';
+import { Roles } from '../common/decorator/rolesDecorator';
 import { CustomersService } from './customers.service';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
-import { Roles } from '../common/decorator/rolesDecorator';
-import { ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 
 @ApiTags('Customers')
 @ApiBearerAuth('bearer')
@@ -30,8 +35,7 @@ export class CustomersController {
   @ApiQuery({ name: 'phone', required: false, type: String })
   @ApiQuery({ name: 'cellphone', required: false, type: String })
   @ApiQuery({ name: 'fullName', required: false, type: String })
-  @ApiQuery({ name: 'status', required: false, enum: UserStatus })
-  @ApiQuery({ name: 'isDeleted', required: false, type: Boolean })
+  @ApiQuery({ name: 'status', required: false, enum: CustomerStatus })
   findAll(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
@@ -40,13 +44,10 @@ export class CustomersController {
     @Query('phone') phone?: string,
     @Query('cellphone') cellphone?: string,
     @Query('fullName') fullName?: string,
-    @Query('status') status?: UserStatus,
-    @Query('isDeleted') isDeleted?: string,
+    @Query('status') status?: CustomerStatus,
   ) {
     const parsedPage = page ? Number(page) : undefined;
     const parsedLimit = limit ? Number(limit) : undefined;
-    const parsedIsDeleted =
-      isDeleted === undefined ? undefined : isDeleted === 'true';
 
     return this.customersService.findAll({
       page: parsedPage,
@@ -57,7 +58,6 @@ export class CustomersController {
       cellphone,
       fullName,
       status,
-      isDeleted: parsedIsDeleted,
     });
   }
 

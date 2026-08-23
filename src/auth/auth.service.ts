@@ -6,23 +6,24 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { OtpPurpose, Role, UserStatus } from '@prisma/client';
-import type { StringValue } from 'ms';
+import { CustomerStatus, OtpPurpose, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
+import type { StringValue } from 'ms';
 import { EmailService } from 'src/email/email.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 type PublicUser = {
   id: string;
   email: string;
+  firstName: string;
+  lastName: string;
   fullName: string;
-  role: Role;
-  status: UserStatus;
+  role: UserRole;
   phone: string | null;
-  cellphone: string | null;
-  companyName: string | null;
+  isActive: boolean;
   isEmailVerified: boolean;
+  emailVerifiedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -44,10 +45,6 @@ export class AuthService {
     return Math.floor(10000 + Math.random() * 90000).toString();
   }
 
-  private hashOtp(otp: string) {
-    return crypto.createHash('sha256').update(otp).digest('hex');
-  }
-
   private getOtpExpiryDate() {
     const minutesRaw = Number(
       this.configService.get<string>('OTP_EXPIRES_MINUTES') ?? '10',
@@ -60,45 +57,40 @@ export class AuthService {
   private toPublicUser(user: {
     id: string;
     email: string;
-    fullName: string;
-    role: Role;
-    status: UserStatus;
+    firstName: string;
+    lastName: string;
+    role: UserRole;
     phone: string | null;
-    cellphone: string | null;
-    companyName: string | null;
-    isEmailVerified: boolean;
+    isActive: boolean;
+    emailVerifiedAt: Date | null;
     createdAt: Date;
     updatedAt: Date;
   }): PublicUser {
     return {
       id: user.id,
       email: user.email,
-      fullName: user.fullName,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      fullName: `${user.firstName} ${user.lastName}`.trim(),
       role: user.role,
-      status: user.status,
       phone: user.phone,
-      cellphone: user.cellphone,
-      companyName: user.companyName,
-      isEmailVerified: user.isEmailVerified,
+      isActive: user.isActive,
+      isEmailVerified: !!user.emailVerifiedAt,
+      emailVerifiedAt: user.emailVerifiedAt,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
   }
 
   private assertUserCanAuthenticate(params: {
-    status: UserStatus;
-    isDeleted: boolean;
-    isEmailVerified: boolean;
+    isActive: boolean;
+    emailVerifiedAt: Date | null;
   }) {
-    if (params.isDeleted) {
-      throw new UnauthorizedException('Account deleted');
-    }
-
-    if (params.status !== UserStatus.ACTIVE) {
+    if (!params.isActive) {
       throw new UnauthorizedException('Account is not active');
     }
 
-    if (!params.isEmailVerified) {
+    if (!params.emailVerifiedAt) {
       throw new UnauthorizedException('Email is not verified');
     }
   }
@@ -119,34 +111,26 @@ export class AuthService {
       data: {
         email,
         purpose,
-        codeHash: this.hashOtp(otp),
+        codeHash: await bcrypt.hash(otp, 10),
         expiresAt,
+        attempts: 0,
+        maxAttempts: 5,
+        isConsumed: false,
       },
     });
 
-    const subject =
+    const emailSubject =
       purpose === OtpPurpose.EMAIL_VERIFICATION
-        ? 'Verify your account'
-        : 'Reset your password';
+        ? 'Verify Your Email'
+        : 'Password Reset OTP';
 
-    const minutesRaw = Number(
-      this.configService.get<string>('OTP_EXPIRES_MINUTES') ?? '10',
-    );
-    const validForMinutes =
-      Number.isFinite(minutesRaw) && minutesRaw > 0 ? minutesRaw : 10;
+    const message = `Your one-time code is ${otp}. It expires in 10 minutes.`;
 
-    const result = await this.emailService.sendOtpEmail({
+    await this.emailService.sendAccountEmail({
       to: email,
-      otp,
-      validForMinutes,
-      subject,
+      subject: emailSubject,
+      message,
     });
-
-    if (!result.success) {
-      throw new ConflictException(
-        result.error ?? 'Unable to send OTP email via AWS SES',
-      );
-    }
   }
 
   private async validateOtpOrThrow(
@@ -159,30 +143,30 @@ export class AuthService {
         email,
         purpose,
         isConsumed: false,
+        expiresAt: { gt: new Date() },
       },
       orderBy: { createdAt: 'desc' },
     });
 
     if (!record) {
-      throw new ConflictException('OTP not found. Please request a new OTP.');
+      throw new UnauthorizedException('Invalid or expired OTP');
     }
 
     if (record.attempts >= record.maxAttempts) {
-      throw new ConflictException('Too many OTP attempts. Please resend OTP.');
+      await this.prisma.otpCode.update({
+        where: { id: record.id },
+        data: { isConsumed: true },
+      });
+      throw new UnauthorizedException('Too many attempts. Request a new OTP');
     }
 
-    if (record.expiresAt.getTime() <= Date.now()) {
-      throw new ConflictException('OTP expired. Please resend OTP.');
-    }
-
-    const valid = record.codeHash === this.hashOtp(otp);
-
-    if (!valid) {
+    const matches = await bcrypt.compare(otp, record.codeHash);
+    if (!matches) {
       await this.prisma.otpCode.update({
         where: { id: record.id },
         data: { attempts: { increment: 1 } },
       });
-      throw new ConflictException('Invalid OTP');
+      throw new UnauthorizedException('Invalid OTP');
     }
 
     await this.prisma.otpCode.update({
@@ -194,16 +178,28 @@ export class AuthService {
   private getRefreshSecret() {
     return (
       this.configService.get<string>('REFRESH_JWT_SECRET') ??
-      this.configService.get<string>('JWT_SECRET') ??
-      ''
+      this.configService.get<string>('JWT_SECRET')
     );
+  }
+
+  private async signAccessToken(user: {
+    id: string;
+    email: string;
+    role: UserRole;
+  }) {
+    return this.jwt.signAsync({
+      id: user.id,
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      tokenType: 'access',
+    });
   }
 
   private async signRefreshToken(user: {
     id: string;
     email: string;
-    role: Role;
-    status: UserStatus;
+    role: UserRole;
   }) {
     const secret = this.getRefreshSecret();
 
@@ -221,7 +217,6 @@ export class AuthService {
         sub: user.id,
         email: user.email,
         role: user.role,
-        status: user.status,
         tokenType: 'refresh',
       },
       { secret, expiresIn },
@@ -242,22 +237,17 @@ export class AuthService {
       where: { email },
       select: {
         id: true,
-        status: true,
-        isDeleted: true,
-        isEmailVerified: true,
+        isActive: true,
+        emailVerifiedAt: true,
       },
     });
 
     if (existing) {
-      if (existing.isDeleted) {
-        throw new ConflictException('Account deleted');
+      if (!existing.isActive) {
+        throw new ConflictException('Account is disabled');
       }
 
-      if (existing.status !== UserStatus.ACTIVE) {
-        throw new ConflictException('Account is not active');
-      }
-
-      if (existing.isEmailVerified) {
+      if (existing.emailVerifiedAt) {
         throw new ConflictException('Email already registered');
       }
 
@@ -269,18 +259,41 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(params.password, 12);
+    const parts = params.fullName.trim().split(' ');
+    const firstName = parts[0] || 'Customer';
+    const lastName = parts.slice(1).join(' ') || '';
 
-    await this.prisma.user.create({
+    const user = await this.prisma.user.create({
       data: {
         email,
-        fullName: params.fullName.trim(),
+        firstName,
+        lastName,
         passwordHash,
         phone: params.phone?.trim() || null,
+        role: UserRole.CUSTOMER,
+        isActive: true,
+      },
+    });
+
+    // Auto-link or create Customer profile
+    await this.prisma.customer.upsert({
+      where: { userId: user.id },
+      create: {
+        userId: user.id,
+        displayName: params.fullName.trim(),
+        firstName,
+        lastName,
+        email,
+        phone: params.phone?.trim() || '',
         cellphone: params.cellphone?.trim() || null,
-        companyName: params.companyName?.trim() || null,
-        role: Role.CUSTOMER,
-        status: UserStatus.ACTIVE,
-        isEmailVerified: false,
+        company: params.companyName?.trim() || null,
+        status: CustomerStatus.ACTIVE,
+      },
+      update: {
+        displayName: params.fullName.trim(),
+        firstName,
+        lastName,
+        status: CustomerStatus.ACTIVE,
       },
     });
 
@@ -298,18 +311,14 @@ export class AuthService {
       where: { email },
       select: {
         id: true,
-        isDeleted: true,
-        status: true,
-        isEmailVerified: true,
+        isActive: true,
+        emailVerifiedAt: true,
       },
     });
 
     if (!user) throw new NotFoundException('User not found');
-    if (user.isDeleted) throw new ConflictException('Account deleted');
-    if (user.status !== UserStatus.ACTIVE) {
-      throw new ConflictException('Account is not active');
-    }
-    if (user.isEmailVerified) {
+    if (!user.isActive) throw new ConflictException('Account is disabled');
+    if (user.emailVerifiedAt) {
       throw new ConflictException('User already verified');
     }
 
@@ -328,18 +337,14 @@ export class AuthService {
       where: { email },
       select: {
         id: true,
-        isDeleted: true,
-        status: true,
-        isEmailVerified: true,
+        isActive: true,
+        emailVerifiedAt: true,
       },
     });
 
     if (!user) throw new NotFoundException('User not found');
-    if (user.isDeleted) throw new ConflictException('Account deleted');
-    if (user.status !== UserStatus.ACTIVE) {
-      throw new ConflictException('Account is not active');
-    }
-    if (user.isEmailVerified) {
+    if (!user.isActive) throw new ConflictException('Account is disabled');
+    if (user.emailVerifiedAt) {
       throw new ConflictException('User already verified');
     }
 
@@ -351,7 +356,7 @@ export class AuthService {
 
     await this.prisma.user.update({
       where: { id: user.id },
-      data: { isEmailVerified: true },
+      data: { emailVerifiedAt: new Date() },
     });
 
     return { message: 'Account verified successfully' };
@@ -369,21 +374,22 @@ export class AuthService {
       select: {
         id: true,
         email: true,
-        fullName: true,
+        firstName: true,
+        lastName: true,
         passwordHash: true,
         role: true,
-        status: true,
         phone: true,
-        cellphone: true,
-        companyName: true,
-        isEmailVerified: true,
-        isDeleted: true,
+        isActive: true,
+        emailVerifiedAt: true,
         createdAt: true,
         updatedAt: true,
       },
     });
 
     if (!user) throw new NotFoundException('User not found');
+    if (!user.passwordHash) {
+      throw new UnauthorizedException('Invalid login credentials');
+    }
 
     this.assertUserCanAuthenticate(user);
 
@@ -391,6 +397,11 @@ export class AuthService {
     if (!ok) {
       throw new UnauthorizedException('Invalid email or password');
     }
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
 
     return {
       user: this.toPublicUser(user),
@@ -406,9 +417,8 @@ export class AuthService {
       where: { email },
       select: {
         id: true,
-        isDeleted: true,
-        status: true,
-        isEmailVerified: true,
+        isActive: true,
+        emailVerifiedAt: true,
       },
     });
 
@@ -434,9 +444,8 @@ export class AuthService {
       where: { email },
       select: {
         id: true,
-        isDeleted: true,
-        status: true,
-        isEmailVerified: true,
+        isActive: true,
+        emailVerifiedAt: true,
       },
     });
 
@@ -466,13 +475,15 @@ export class AuthService {
       select: {
         id: true,
         passwordHash: true,
-        status: true,
-        isDeleted: true,
-        isEmailVerified: true,
+        isActive: true,
+        emailVerifiedAt: true,
       },
     });
 
     if (!user) throw new UnauthorizedException('Unauthorized');
+    if (!user.passwordHash) {
+      throw new UnauthorizedException('Password not set for account');
+    }
 
     this.assertUserCanAuthenticate(user);
 
@@ -518,14 +529,12 @@ export class AuthService {
       select: {
         id: true,
         email: true,
-        fullName: true,
+        firstName: true,
+        lastName: true,
         role: true,
-        status: true,
         phone: true,
-        cellphone: true,
-        companyName: true,
-        isEmailVerified: true,
-        isDeleted: true,
+        isActive: true,
+        emailVerifiedAt: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -552,14 +561,12 @@ export class AuthService {
       select: {
         id: true,
         email: true,
-        fullName: true,
+        firstName: true,
+        lastName: true,
         role: true,
-        status: true,
         phone: true,
-        cellphone: true,
-        companyName: true,
-        isEmailVerified: true,
-        isDeleted: true,
+        isActive: true,
+        emailVerifiedAt: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -570,21 +577,5 @@ export class AuthService {
     this.assertUserCanAuthenticate(user);
 
     return this.toPublicUser(user);
-  }
-
-  private async signAccessToken(user: {
-    id: string;
-    email: string;
-    role: Role;
-    status: UserStatus;
-  }) {
-    return this.jwt.signAsync({
-      id: user.id,
-      sub: user.id,
-      email: user.email,
-      role: user.role,
-      status: user.status,
-      tokenType: 'access',
-    });
   }
 }

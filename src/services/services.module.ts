@@ -1,18 +1,26 @@
 import { Module } from '@nestjs/common';
-import { ServicesController } from './services.controller';
+import { ScheduleController } from './schedule.controller';
+import { ScheduleService } from './schedule.service';
 import { ServiceCatalogService } from './service-catalog.service';
+import { ServiceRequestsController } from './service-requests.controller';
 import { ServiceRequestsService } from './service-requests.service';
-import { ServiceQuotationsService } from './service-quotations.service';
-import { ServiceSchedulesService } from './service-schedules.service';
+import { ServicesController } from './services.controller';
 
 @Module({
-  controllers: [ServicesController],
+  controllers: [
+    ServicesController,
+    ServiceRequestsController,
+    ScheduleController,
+  ],
   providers: [
     ServiceCatalogService,
     ServiceRequestsService,
-    ServiceQuotationsService,
-    ServiceSchedulesService,
+    ScheduleService,
   ],
-  exports: [ServiceCatalogService],
+  exports: [
+    ServiceCatalogService,
+    ServiceRequestsService,
+    ScheduleService,
+  ],
 })
 export class ServicesModule {}

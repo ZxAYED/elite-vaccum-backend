@@ -8,7 +8,7 @@ import { AuthGuard } from './common/guards/auth/auth.guard';
 import { PrismaModule } from './prisma/prisma.module';
 import { CustomersModule } from './customers/customers.module';
 // import { TechniciansModule } from './technicians/technicians.module';
-// import { ServicesModule } from './services/services.module';
+import { ServicesModule } from './services/services.module';
 // import { OrdersModule } from './orders/orders.module';
 // import { TransactionsModule } from './transactions/transactions.module';
 // import { AnalyticsModule } from './analytics/analytics.module';
@@ -54,7 +54,7 @@ import { AiModule } from './ai/ai.module';
     AuthModule,
     CustomersModule,
     // TechniciansModule,
-    // ServicesModule,
+    ServicesModule,
     StoreModule,
     //      OrdersModule,
     // TransactionsModule,
