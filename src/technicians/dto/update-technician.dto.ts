@@ -1,39 +1,59 @@
-import { PartialType } from '@nestjs/swagger';
+import { ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import { TechnicianStatus } from '@prisma/client';
+import { Type } from 'class-transformer';
 import {
-  IsBoolean,
+  IsArray,
   IsEnum,
+  IsInt,
+  IsNumber,
+  IsObject,
   IsOptional,
   IsString,
-  MaxLength,
+  Max,
+  Min,
 } from 'class-validator';
-import { TechnicianStatus, UserStatus } from '@prisma/client';
 import { CreateTechnicianDto } from './create-technician.dto';
-import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateTechnicianDto extends PartialType(CreateTechnicianDto) {
+  @ApiPropertyOptional({ example: 5.0 })
+  @IsOptional()
+  @IsNumber()
+  readonly rating?: number;
+
+  @ApiPropertyOptional({ example: 12 })
+  @IsOptional()
+  @IsInt()
+  readonly completedJobs?: number;
+}
+
+export class TechnicianListQueryDto {
+  @ApiPropertyOptional({ example: 1, default: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  readonly page?: number = 1;
+
+  @ApiPropertyOptional({ example: 10, default: 10 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  readonly limit?: number = 10;
+
   @ApiPropertyOptional({ enum: TechnicianStatus })
   @IsOptional()
   @IsEnum(TechnicianStatus)
-  status?: TechnicianStatus;
+  readonly status?: TechnicianStatus;
 
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsBoolean()
-  isVerified?: boolean;
-
-  @ApiPropertyOptional({ example: '+1-555-111-9999' })
+  @ApiPropertyOptional({ example: 'Alex' })
   @IsOptional()
   @IsString()
-  @MaxLength(30)
-  cellphone?: string;
+  readonly search?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: 'VACUUM_REPAIR' })
   @IsOptional()
-  @IsBoolean()
-  isAccountDeleted?: boolean;
-
-  @ApiPropertyOptional({ enum: UserStatus })
-  @IsOptional()
-  @IsEnum(UserStatus)
-  userStatus?: UserStatus;
+  @IsString()
+  readonly specialization?: string;
 }

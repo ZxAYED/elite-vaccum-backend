@@ -3,304 +3,269 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Role, TechnicianStatus, UserStatus } from '@prisma/client';
+import { Prisma, TechnicianStatus, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
-import { getPagination } from '../common/utils/pagination';
-import { PrismaService } from '../prisma/prisma.service';
+import { getPagination } from 'src/common/utils/pagination';
+import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateTechnicianDto } from './dto/create-technician.dto';
-import { UpdateTechnicianDto } from './dto/update-technician.dto';
+import { TechnicianListQueryDto, UpdateTechnicianDto } from './dto/update-technician.dto';
 
 @Injectable()
 export class TechniciansService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private async ensureUniqueTechnicianEmail(
-    email: string,
-    excludeUserId?: string,
-  ) {
-    const existing = await this.prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
-      select: { id: true, role: true },
-    });
-
-    if (!existing) {
-      return;
-    }
-
-    if (excludeUserId && existing.id === excludeUserId) {
-      return;
-    }
-
-    if (existing.role === Role.TECHNICIAN) {
-      throw new ConflictException('Technician with this email already exists');
-    }
-
-    throw new ConflictException('Email already used by another account');
+  private includeRelations() {
+    return {
+      user: {
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+          isActive: true,
+        },
+      },
+      _count: {
+        select: {
+          assignedRequests: true,
+          assignedJobs: true,
+          appointments: true,
+          serviceReports: true,
+        },
+      },
+    } satisfies Prisma.TechnicianInclude;
   }
 
-  private async findTechnicianOrThrow(id: string) {
-    const technician = await this.prisma.technicianProfile.findUnique({
+  async findAll(query: TechnicianListQueryDto) {
+    const where: Prisma.TechnicianWhereInput = {
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.specialization
+        ? { specializations: { has: query.specialization } }
+        : {}),
+      ...(query.search
+        ? {
+            OR: [
+              { displayName: { contains: query.search, mode: 'insensitive' } },
+              { email: { contains: query.search, mode: 'insensitive' } },
+              { phone: { contains: query.search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+
+    const totalItems = await this.prisma.technician.count({ where });
+    const { skip, take, meta } = getPagination(
+      query.page,
+      query.limit,
+      totalItems,
+    );
+
+    const items = await this.prisma.technician.findMany({
+      where,
+      skip,
+      take,
+      orderBy: { createdAt: 'desc' },
+      include: this.includeRelations(),
+    });
+
+    const activeCount = await this.prisma.technician.count({
+      where: { status: TechnicianStatus.ACTIVE },
+    });
+    const onLeaveCount = await this.prisma.technician.count({
+      where: { status: TechnicianStatus.ON_LEAVE },
+    });
+
+    return {
+      items,
+      meta: {
+        ...meta,
+        stats: {
+          active: activeCount,
+          onLeave: onLeaveCount,
+          total: totalItems,
+        },
+      },
+    };
+  }
+
+  async findOne(id: string) {
+    const technician = await this.prisma.technician.findUnique({
       where: { id },
       include: {
         user: {
           select: {
             id: true,
             email: true,
-            fullName: true,
-            phone: true,
-            cellphone: true,
-            status: true,
-            isDeleted: true,
-            createdAt: true,
-            updatedAt: true,
+            firstName: true,
+            lastName: true,
+            role: true,
+            isActive: true,
           },
         },
-        specializations: {
+        assignedRequests: {
+          take: 5,
+          orderBy: { submittedAt: 'desc' },
           select: {
             id: true,
-            name: true,
+            businessId: true,
+            title: true,
+            status: true,
+            preferredDate: true,
+          },
+        },
+        assignedJobs: {
+          take: 5,
+          orderBy: { scheduledAt: 'desc' },
+          select: {
+            id: true,
+            businessId: true,
+            status: true,
+            scheduledAt: true,
+            totalUsd: true,
+          },
+        },
+        appointments: {
+          take: 5,
+          orderBy: { startAt: 'desc' },
+          select: {
+            id: true,
+            status: true,
+            startAt: true,
+            endAt: true,
+            notes: true,
+          },
+        },
+        serviceReports: {
+          take: 5,
+          orderBy: { createdAt: 'desc' },
+        },
+        _count: {
+          select: {
+            assignedRequests: true,
+            assignedJobs: true,
+            appointments: true,
+            serviceReports: true,
           },
         },
       },
     });
 
     if (!technician) {
-      throw new NotFoundException('Technician not found');
+      throw new NotFoundException(`Technician with ID '${id}' not found`);
     }
 
     return technician;
   }
 
-  async create(createTechnicianDto: CreateTechnicianDto) {
-    const { specializations = [], email, name, phone } = createTechnicianDto;
-    const normalizedEmail = email.trim().toLowerCase();
+  async create(dto: CreateTechnicianDto) {
+    const email = dto.email.trim().toLowerCase();
 
-    await this.ensureUniqueTechnicianEmail(normalizedEmail);
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email },
+    });
 
-    const temporaryPassword = `Temp#${Math.random().toString(36).slice(-10)}A1`;
-    const passwordHash = await bcrypt.hash(temporaryPassword, 12);
+    if (existingUser) {
+      throw new ConflictException(`A user with email '${email}' already exists`);
+    }
 
-    return this.prisma.technicianProfile.create({
-      data: {
-        user: {
-          create: {
-            email: normalizedEmail,
-            fullName: name.trim(),
-            phone: phone?.trim() || null,
-            passwordHash,
-            role: Role.TECHNICIAN,
-            status: UserStatus.ACTIVE,
-            isEmailVerified: true,
-          },
+    const parts = dto.displayName.trim().split(' ');
+    const firstName = parts[0] || 'Technician';
+    const lastName = parts.slice(1).join(' ') || '';
+    const passwordHash = await bcrypt.hash(dto.password || 'Password123!', 10);
+
+    return this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email,
+          firstName,
+          lastName,
+          phone: dto.phone.trim(),
+          passwordHash,
+          role: UserRole.TECHNICIAN,
+          isActive: true,
+          emailVerifiedAt: new Date(),
         },
-        specializations: {
-          connectOrCreate: specializations.map((spec) => ({
-            where: { name: spec.trim() },
-            create: { name: spec.trim() },
-          })),
+      });
+
+      const technician = await tx.technician.create({
+        data: {
+          userId: user.id,
+          displayName: dto.displayName.trim(),
+          email,
+          phone: dto.phone.trim(),
+          status: dto.status || TechnicianStatus.ACTIVE,
+          specializations: dto.specializations || [],
+          defaultAvailability: dto.defaultAvailability
+            ? (dto.defaultAvailability as Prisma.InputJsonValue)
+            : Prisma.DbNull,
+          adminNotes: dto.adminNotes?.trim() || null,
         },
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            fullName: true,
-            phone: true,
-            cellphone: true,
-            status: true,
-            isDeleted: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-        },
-        specializations: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
+        include: this.includeRelations(),
+      });
+
+      return {
+        success: true,
+        message: 'Technician account created successfully',
+        technician,
+      };
     });
   }
 
-  async findAll(params: {
-    page?: number;
-    limit?: number;
-    search?: string;
-    status?: TechnicianStatus;
-    verified?: boolean;
-  }) {
-    const { page, limit, search, status, verified } = params;
-    const where: Prisma.TechnicianProfileWhereInput = {
-      ...(status ? { status } : {}),
-      ...(verified !== undefined ? { isVerified: verified } : {}),
-      ...(search
-        ? {
-            OR: [
-              {
-                user: {
-                  fullName: { contains: search, mode: 'insensitive' },
-                },
-              },
-              {
-                user: {
-                  email: { contains: search, mode: 'insensitive' },
-                },
-              },
-            ],
-          }
-        : {}),
-    };
+  async update(id: string, dto: UpdateTechnicianDto) {
+    const existing = await this.prisma.technician.findUnique({
+      where: { id },
+    });
 
-    const totalItems = await this.prisma.technicianProfile.count({ where });
-    const pagination = getPagination(page, limit, totalItems);
+    if (!existing) {
+      throw new NotFoundException(`Technician with ID '${id}' not found`);
+    }
 
-    const data = await this.prisma.technicianProfile.findMany({
-      where,
-      skip: pagination.skip,
-      take: pagination.take,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            fullName: true,
-            phone: true,
-            cellphone: true,
-            status: true,
-            isDeleted: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-        },
-        specializations: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
+    const updated = await this.prisma.technician.update({
+      where: { id },
+      data: {
+        ...(dto.displayName ? { displayName: dto.displayName.trim() } : {}),
+        ...(dto.phone ? { phone: dto.phone.trim() } : {}),
+        ...(dto.status ? { status: dto.status } : {}),
+        ...(dto.rating !== undefined ? { rating: new Prisma.Decimal(dto.rating) } : {}),
+        ...(dto.completedJobs !== undefined ? { completedJobs: dto.completedJobs } : {}),
+        ...(dto.specializations ? { specializations: dto.specializations } : {}),
+        ...(dto.defaultAvailability !== undefined
+          ? {
+              defaultAvailability: dto.defaultAvailability
+                ? (dto.defaultAvailability as Prisma.InputJsonValue)
+                : Prisma.DbNull,
+            }
+          : {}),
+        ...(dto.adminNotes !== undefined ? { adminNotes: dto.adminNotes?.trim() || null } : {}),
       },
+      include: this.includeRelations(),
     });
 
     return {
-      data,
-      meta: pagination.meta,
+      success: true,
+      message: 'Technician updated successfully',
+      technician: updated,
     };
   }
 
-  async findOne(id: string) {
-    return this.findTechnicianOrThrow(id);
-  }
+  async remove(id: string) {
+    const existing = await this.prisma.technician.findUnique({
+      where: { id },
+    });
 
-  async update(id: string, updateTechnicianDto: UpdateTechnicianDto) {
-    const existing = await this.findTechnicianOrThrow(id);
-    const {
-      specializations,
-      status,
-      isVerified,
-      name,
-      email,
-      phone,
-      cellphone,
-      isAccountDeleted,
-      userStatus,
-      ...profileFields
-    } = updateTechnicianDto;
-
-    if (email) {
-      await this.ensureUniqueTechnicianEmail(
-        email.trim().toLowerCase(),
-        existing.user.id,
-      );
+    if (!existing) {
+      throw new NotFoundException(`Technician with ID '${id}' not found`);
     }
 
-    return this.prisma.technicianProfile.update({
-      where: { id },
-      data: {
-        ...profileFields,
-        ...(status ? { status } : {}),
-        ...(isVerified !== undefined ? { isVerified } : {}),
-        ...(specializations
-          ? {
-              specializations: {
-                set: [],
-                connectOrCreate: specializations.map((spec) => ({
-                  where: { name: spec.trim() },
-                  create: { name: spec.trim() },
-                })),
-              },
-            }
-          : {}),
-        user: {
-          update: {
-            ...(name ? { fullName: name.trim() } : {}),
-            ...(email ? { email: email.trim().toLowerCase() } : {}),
-            ...(phone !== undefined ? { phone: phone?.trim() || null } : {}),
-            ...(cellphone !== undefined
-              ? { cellphone: cellphone?.trim() || null }
-              : {}),
-            ...(isAccountDeleted !== undefined
-              ? { isDeleted: isAccountDeleted }
-              : {}),
-            ...(userStatus ? { status: userStatus } : {}),
-          },
-        },
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            fullName: true,
-            phone: true,
-            cellphone: true,
-            status: true,
-            isDeleted: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-        },
-        specializations: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
-    });
-  }
+    await this.prisma.$transaction([
+      this.prisma.technician.delete({ where: { id } }),
+      this.prisma.user.delete({ where: { id: existing.userId } }),
+    ]);
 
-  async verify(id: string) {
-    await this.findTechnicianOrThrow(id);
-
-    return this.prisma.technicianProfile.update({
-      where: { id },
-      data: {
-        isVerified: true,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            fullName: true,
-            phone: true,
-            cellphone: true,
-            status: true,
-            isDeleted: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-        },
-        specializations: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
-    });
+    return {
+      success: true,
+      message: 'Technician deleted successfully',
+    };
   }
 }

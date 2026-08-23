@@ -4,8 +4,6 @@
     "node_modules",
     "test",
     "dist",
-    "**/*spec.ts",
-    "src/technicians",
-    "src/technicians/**/*"
+    "**/*spec.ts"
   ]
 }

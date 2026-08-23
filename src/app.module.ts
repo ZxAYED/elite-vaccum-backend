@@ -1,23 +1,25 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { AiModule } from './ai/ai.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
+import { BillingModule } from './billing/billing.module';
 import { AuthGuard } from './common/guards/auth/auth.guard';
-import { PrismaModule } from './prisma/prisma.module';
 import { CustomersModule } from './customers/customers.module';
-// import { TechniciansModule } from './technicians/technicians.module';
-import { ServicesModule } from './services/services.module';
-// import { OrdersModule } from './orders/orders.module';
-// import { TransactionsModule } from './transactions/transactions.module';
-// import { AnalyticsModule } from './analytics/analytics.module';
-// import { SettingsModule } from './settings/settings.module';
 import { EmailModule } from './email/email.module';
-import { StorageModule } from './storage/storage.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { PrismaModule } from './prisma/prisma.module';
+import { QuotationsModule } from './quotations/quotations.module';
+import { ReportsModule } from './reports/reports.module';
+import { ReviewsModule } from './reviews/reviews.module';
+import { ServiceOrdersModule } from './service-orders/service-orders.module';
+import { ServicesModule } from './services/services.module';
+import { SettingsModule } from './settings/settings.module';
+import { StorageModule } from './storage/storage.module';
 import { StoreModule } from './store/store.module';
-import { AiModule } from './ai/ai.module';
+import { TechniciansModule } from './technicians/technicians.module';
 
 @Module({
   imports: [
@@ -53,13 +55,15 @@ import { AiModule } from './ai/ai.module';
     AiModule,
     AuthModule,
     CustomersModule,
-    // TechniciansModule,
+    TechniciansModule,
     ServicesModule,
+    QuotationsModule,
+    ServiceOrdersModule,
+    BillingModule,
+    ReviewsModule,
+    ReportsModule,
+    SettingsModule,
     StoreModule,
-    //      OrdersModule,
-    // TransactionsModule,
-    // AnalyticsModule,
-    //      SettingsModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: AuthGuard }],

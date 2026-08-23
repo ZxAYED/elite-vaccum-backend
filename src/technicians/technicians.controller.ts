@@ -1,86 +1,67 @@
 import {
-  Controller,
-  Get,
-  Post,
   Body,
-  Patch,
+  Controller,
+  Delete,
+  Get,
   Param,
+  Patch,
+  Post,
   Query,
 } from '@nestjs/common';
 import {
-  ApiTags,
-  ApiOperation,
-  ApiQuery,
-  ApiBody,
   ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
 } from '@nestjs/swagger';
-import { TechnicianStatus } from '@prisma/client';
-import { Roles } from '../common/decorator/rolesDecorator';
-import { TechniciansService } from './technicians.service';
+import { Roles } from 'src/common/decorator/rolesDecorator';
 import { CreateTechnicianDto } from './dto/create-technician.dto';
-import { UpdateTechnicianDto } from './dto/update-technician.dto';
+import { TechnicianListQueryDto, UpdateTechnicianDto } from './dto/update-technician.dto';
+import { TechniciansService } from './technicians.service';
 
-@ApiTags('Technicians')
-@ApiBearerAuth('bearer')
-@Roles('ADMIN', 'STAFF')
+@ApiTags('Team - Technicians')
+@ApiBearerAuth('JWT-auth')
+@Roles('ADMIN')
 @Controller('technicians')
 export class TechniciansController {
   constructor(private readonly techniciansService: TechniciansService) {}
 
-  @Post()
-  @ApiOperation({ summary: 'Create a new technician' })
-  @ApiBody({ type: CreateTechnicianDto })
-  create(@Body() createTechnicianDto: CreateTechnicianDto) {
-    return this.techniciansService.create(createTechnicianDto);
-  }
-
   @Get()
-  @ApiOperation({ summary: 'Get all technicians' })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiQuery({ name: 'search', required: false, type: String })
-  @ApiQuery({ name: 'status', required: false, enum: TechnicianStatus })
-  @ApiQuery({ name: 'verified', required: false, type: Boolean })
-  findAll(
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('search') search?: string,
-    @Query('status') status?: TechnicianStatus,
-    @Query('verified') verified?: string,
-  ) {
-    const parsedPage = page ? Number(page) : undefined;
-    const parsedLimit = limit ? Number(limit) : undefined;
-    const parsedVerified =
-      verified === undefined ? undefined : verified === 'true';
-
-    return this.techniciansService.findAll({
-      page: parsedPage,
-      limit: parsedLimit,
-      search,
-      status,
-      verified: parsedVerified,
-    });
+  @ApiOperation({ summary: 'Admin: List all technicians with filters and stats' })
+  @ApiResponse({ status: 200, description: 'List of technicians' })
+  async findAll(@Query() query: TechnicianListQueryDto) {
+    return this.techniciansService.findAll(query);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get a technician by ID' })
-  findOne(@Param('id') id: string) {
+  @ApiOperation({ summary: 'Admin: Get technician details by ID' })
+  @ApiResponse({ status: 200, description: 'Technician details' })
+  @ApiResponse({ status: 404, description: 'Technician not found' })
+  async findOne(@Param('id') id: string) {
     return this.techniciansService.findOne(id);
   }
 
-  @Patch(':id')
-  @ApiOperation({ summary: 'Update a technician' })
-  @ApiBody({ type: UpdateTechnicianDto })
-  update(
-    @Param('id') id: string,
-    @Body() updateTechnicianDto: UpdateTechnicianDto,
-  ) {
-    return this.techniciansService.update(id, updateTechnicianDto);
+  @Post()
+  @ApiOperation({ summary: 'Admin: Create a new technician account' })
+  @ApiResponse({ status: 201, description: 'Technician created' })
+  async create(@Body() dto: CreateTechnicianDto) {
+    return this.techniciansService.create(dto);
   }
 
-  @Patch(':id/verify')
-  @ApiOperation({ summary: 'Verify a technician' })
-  verify(@Param('id') id: string) {
-    return this.techniciansService.verify(id);
+  @Patch(':id')
+  @ApiOperation({ summary: 'Admin: Update technician details, specializations, status' })
+  @ApiResponse({ status: 200, description: 'Technician updated' })
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdateTechnicianDto,
+  ) {
+    return this.techniciansService.update(id, dto);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Admin: Delete technician account' })
+  @ApiResponse({ status: 200, description: 'Technician deleted' })
+  async remove(@Param('id') id: string) {
+    return this.techniciansService.remove(id);
   }
 }

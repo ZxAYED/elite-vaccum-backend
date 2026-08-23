@@ -1,0 +1,507 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  InvoiceStatus,
+  PaymentStatus,
+  Prisma,
+  UserRole,
+} from '@prisma/client';
+import { RequestUser } from 'src/common/decorator/currentUser.decorator';
+import { generateBusinessId } from 'src/common/utils/business-id.util';
+import { getPagination } from 'src/common/utils/pagination';
+import { PrismaService } from 'src/prisma/prisma.service';
+import { CreateInvoiceDto } from './dto/create-invoice.dto';
+import {
+  InvoiceListQueryDto,
+  RecordPaymentDto,
+  RecordRefundDto,
+  UpdateInvoiceDto,
+} from './dto/update-invoice.dto';
+
+@Injectable()
+export class BillingService {
+  private readonly logger = new Logger(BillingService.name);
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  private isAdmin(user?: RequestUser | null) {
+    return user?.role === UserRole.ADMIN;
+  }
+
+  private async generateInvoiceBusinessId(): Promise<string> {
+    return generateBusinessId('INV', async (id) => {
+      const exists = await this.prisma.invoice.findUnique({
+        where: { businessId: id },
+        select: { id: true },
+      });
+      return !!exists;
+    });
+  }
+
+  private invoiceInclude() {
+    return {
+      customer: {
+        select: {
+          id: true,
+          userId: true,
+          displayName: true,
+          email: true,
+          phone: true,
+        },
+      },
+      lineItems: {
+        orderBy: { sortOrder: 'asc' },
+      },
+      payments: {
+        orderBy: { processedAt: 'desc' },
+      },
+      refunds: {
+        orderBy: { processedAt: 'desc' },
+      },
+      productOrder: {
+        select: {
+          id: true,
+          businessId: true,
+          status: true,
+          totalUsd: true,
+        },
+      },
+      serviceOrder: {
+        select: {
+          id: true,
+          businessId: true,
+          status: true,
+          summary: true,
+        },
+      },
+    } satisfies Prisma.InvoiceInclude;
+  }
+
+  // ==========================================
+  // CREATE INVOICE
+  // ==========================================
+
+  async create(dto: CreateInvoiceDto, user: RequestUser) {
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: dto.customerId },
+    });
+
+    if (!customer) {
+      throw new NotFoundException(`Customer with ID '${dto.customerId}' not found`);
+    }
+
+    if (!dto.lineItems || dto.lineItems.length === 0) {
+      throw new BadRequestException('Invoice must contain at least one line item');
+    }
+
+    const businessId = await this.generateInvoiceBusinessId();
+
+    const subtotal = dto.lineItems.reduce(
+      (sum, item) => sum + item.unitPriceUsd * item.quantity,
+      0,
+    );
+    const discount = dto.discountUsd || 0;
+    const tax = dto.taxUsd || 0;
+    const total = Math.max(0, subtotal - discount + tax);
+
+    const dueDate = dto.dueDate
+      ? new Date(dto.dueDate)
+      : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+
+    const invoice = await this.prisma.invoice.create({
+      data: {
+        businessId,
+        customerId: dto.customerId,
+        serviceOrderId: dto.serviceOrderId || null,
+        productOrderId: dto.productOrderId || null,
+        status: dto.status || InvoiceStatus.ISSUED,
+        dueDate,
+        subtotalUsd: new Prisma.Decimal(subtotal),
+        discountUsd: new Prisma.Decimal(discount),
+        taxUsd: new Prisma.Decimal(tax),
+        totalUsd: new Prisma.Decimal(total),
+        notes: dto.notes?.trim() || null,
+        lineItems: {
+          create: dto.lineItems.map((item, idx) => ({
+            description: item.description.trim(),
+            quantity: item.quantity,
+            unitPriceUsd: new Prisma.Decimal(item.unitPriceUsd),
+            totalUsd: new Prisma.Decimal(item.unitPriceUsd * item.quantity),
+            sortOrder: idx + 1,
+          })),
+        },
+      },
+      include: this.invoiceInclude(),
+    });
+
+    this.logger.log(`Invoice '${invoice.businessId}' created by Admin (${user.email})`);
+
+    return {
+      success: true,
+      message: 'Invoice created successfully',
+      invoice,
+    };
+  }
+
+  // ==========================================
+  // LIST INVOICES
+  // ==========================================
+
+  async findAll(query: InvoiceListQueryDto) {
+    const where: Prisma.InvoiceWhereInput = {
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.customerId ? { customerId: query.customerId } : {}),
+      ...(query.search
+        ? {
+            OR: [
+              { businessId: { contains: query.search, mode: 'insensitive' } },
+              { customer: { displayName: { contains: query.search, mode: 'insensitive' } } },
+              { customer: { email: { contains: query.search, mode: 'insensitive' } } },
+            ],
+          }
+        : {}),
+    };
+
+    const totalItems = await this.prisma.invoice.count({ where });
+    const { skip, take, meta } = getPagination(query.page, query.limit, totalItems);
+
+    const [
+      items,
+      issuedCount,
+      paidCount,
+      partiallyPaidCount,
+      overdueCount,
+      voidCount,
+    ] = await Promise.all([
+      this.prisma.invoice.findMany({
+        where,
+        skip,
+        take,
+        orderBy: { issueDate: 'desc' },
+        include: this.invoiceInclude(),
+      }),
+      this.prisma.invoice.count({ where: { status: InvoiceStatus.ISSUED } }),
+      this.prisma.invoice.count({ where: { status: InvoiceStatus.PAID } }),
+      this.prisma.invoice.count({ where: { status: InvoiceStatus.PARTIALLY_PAID } }),
+      this.prisma.invoice.count({ where: { status: InvoiceStatus.OVERDUE } }),
+      this.prisma.invoice.count({ where: { status: InvoiceStatus.VOID } }),
+    ]);
+
+    return {
+      items,
+      meta: {
+        ...meta,
+        kpi: {
+          issued: issuedCount,
+          paid: paidCount,
+          partiallyPaid: partiallyPaidCount,
+          overdue: overdueCount,
+          void: voidCount,
+          total: totalItems,
+        },
+      },
+    };
+  }
+
+  async getMyInvoices(query: InvoiceListQueryDto, user: RequestUser) {
+    const customer = await this.prisma.customer.findUnique({
+      where: { userId: user.id },
+      select: { id: true },
+    });
+
+    if (!customer) {
+      return { items: [], meta: { page: 1, limit: 10, total: 0, totalPages: 0 } };
+    }
+
+    const where: Prisma.InvoiceWhereInput = {
+      customerId: customer.id,
+      status: { notIn: [InvoiceStatus.DRAFT] },
+      ...(query.status ? { status: query.status } : {}),
+    };
+
+    const totalItems = await this.prisma.invoice.count({ where });
+    const { skip, take, meta } = getPagination(query.page, query.limit, totalItems);
+
+    const items = await this.prisma.invoice.findMany({
+      where,
+      skip,
+      take,
+      orderBy: { issueDate: 'desc' },
+      include: this.invoiceInclude(),
+    });
+
+    return { items, meta };
+  }
+
+  async findOne(id: string, user?: RequestUser | null) {
+    const invoice = await this.prisma.invoice.findFirst({
+      where: {
+        OR: [{ id }, { businessId: id }],
+      },
+      include: this.invoiceInclude(),
+    });
+
+    if (!invoice) {
+      throw new NotFoundException(`Invoice '${id}' not found`);
+    }
+
+    if (!this.isAdmin(user)) {
+      if (!user || user.id !== invoice.customer.userId) {
+        throw new ForbiddenException('You do not have permission to view this invoice');
+      }
+    }
+
+    return invoice;
+  }
+
+  // ==========================================
+  // UPDATE INVOICE
+  // ==========================================
+
+  async update(id: string, dto: UpdateInvoiceDto, user: RequestUser) {
+    const existing = await this.prisma.invoice.findUnique({
+      where: { id },
+      include: { lineItems: true },
+    });
+
+    if (!existing) throw new NotFoundException(`Invoice with ID '${id}' not found`);
+
+    if (existing.status === InvoiceStatus.PAID) {
+      throw new BadRequestException('Cannot edit an already paid invoice');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      let subtotal = Number(existing.subtotalUsd);
+      let discount = dto.discountUsd !== undefined ? dto.discountUsd : Number(existing.discountUsd);
+      let tax = dto.taxUsd !== undefined ? dto.taxUsd : Number(existing.taxUsd);
+
+      if (dto.lineItems && dto.lineItems.length > 0) {
+        subtotal = dto.lineItems.reduce(
+          (sum, item) => sum + item.unitPriceUsd * item.quantity,
+          0,
+        );
+
+        await tx.invoiceLineItem.deleteMany({ where: { invoiceId: id } });
+        await tx.invoiceLineItem.createMany({
+          data: dto.lineItems.map((item, idx) => ({
+            invoiceId: id,
+            description: item.description.trim(),
+            quantity: item.quantity,
+            unitPriceUsd: new Prisma.Decimal(item.unitPriceUsd),
+            totalUsd: new Prisma.Decimal(item.unitPriceUsd * item.quantity),
+            sortOrder: idx + 1,
+          })),
+        });
+      }
+
+      const total = Math.max(0, subtotal - discount + tax);
+
+      const updated = await tx.invoice.update({
+        where: { id },
+        data: {
+          subtotalUsd: new Prisma.Decimal(subtotal),
+          discountUsd: new Prisma.Decimal(discount),
+          taxUsd: new Prisma.Decimal(tax),
+          totalUsd: new Prisma.Decimal(total),
+          status: dto.status || existing.status,
+          notes: dto.notes !== undefined ? dto.notes?.trim() || null : existing.notes,
+          dueDate: dto.dueDate ? new Date(dto.dueDate) : existing.dueDate,
+        },
+        include: this.invoiceInclude(),
+      });
+
+      return {
+        success: true,
+        message: 'Invoice updated successfully',
+        invoice: updated,
+      };
+    });
+  }
+
+  // ==========================================
+  // PAYMENTS & REFUNDS
+  // ==========================================
+
+  async recordPayment(id: string, dto: RecordPaymentDto, user: RequestUser) {
+    const invoice = await this.prisma.invoice.findUnique({
+      where: { id },
+      include: { payments: true },
+    });
+
+    if (!invoice) throw new NotFoundException(`Invoice with ID '${id}' not found`);
+
+    return this.prisma.$transaction(async (tx) => {
+      const payment = await tx.payment.create({
+        data: {
+          invoiceId: id,
+          customerId: invoice.customerId,
+          amountUsd: new Prisma.Decimal(dto.amountUsd),
+          methodLabel: dto.methodLabel.trim(),
+          transactionReference: dto.transactionReference?.trim() || null,
+          status: dto.status || PaymentStatus.SUCCEEDED,
+        },
+      });
+
+      // Calculate total paid across all payments
+      const existingPaid = invoice.payments
+        .filter((p) => p.status === PaymentStatus.SUCCEEDED)
+        .reduce((sum, p) => sum + Number(p.amountUsd), 0);
+
+      const totalPaid = existingPaid + dto.amountUsd;
+      const invoiceTotal = Number(invoice.totalUsd);
+
+      const newStatus =
+        totalPaid >= invoiceTotal ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID;
+
+      const updatedInvoice = await tx.invoice.update({
+        where: { id },
+        data: {
+          status: newStatus,
+          paidAt: newStatus === InvoiceStatus.PAID ? new Date() : invoice.paidAt,
+        },
+        include: this.invoiceInclude(),
+      });
+
+      return {
+        success: true,
+        message: `Payment of $${dto.amountUsd.toFixed(2)} recorded. Invoice marked ${newStatus}`,
+        payment,
+        invoice: updatedInvoice,
+      };
+    });
+  }
+
+  async recordRefund(id: string, dto: RecordRefundDto, user: RequestUser) {
+    const invoice = await this.prisma.invoice.findUnique({
+      where: { id },
+      include: { payments: true },
+    });
+
+    if (!invoice) throw new NotFoundException(`Invoice with ID '${id}' not found`);
+
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: dto.paymentId },
+    });
+
+    if (!payment || payment.invoiceId !== id) {
+      throw new NotFoundException(`Payment '${dto.paymentId}' not found for this invoice`);
+    }
+
+    const refund = await this.prisma.refund.create({
+      data: {
+        invoiceId: id,
+        paymentId: dto.paymentId,
+        amountUsd: new Prisma.Decimal(dto.amountUsd),
+        status: 'COMPLETED',
+        reason: dto.reason.trim(),
+      },
+    });
+
+    return {
+      success: true,
+      message: `Refund of $${dto.amountUsd.toFixed(2)} processed`,
+      refund,
+    };
+  }
+
+  async generateHtmlInvoice(id: string, user?: RequestUser | null) {
+    const invoice = await this.findOne(id, user);
+
+    const lineItemsHtml = invoice.lineItems
+      .map(
+        (item) => `
+        <tr>
+          <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.description}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">$${Number(item.unitPriceUsd).toFixed(2)}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">$${Number(item.totalUsd).toFixed(2)}</td>
+        </tr>`,
+      )
+      .join('');
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8"/>
+        <title>Invoice ${invoice.businessId}</title>
+        <style>
+          body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #333; padding: 40px; }
+          .header { display: flex; justify-content: space-between; border-bottom: 2px solid #004488; padding-bottom: 20px; }
+          .title { font-size: 28px; color: #004488; font-weight: bold; }
+          .info-table { width: 100%; margin-top: 30px; border-collapse: collapse; }
+          .items-table { width: 100%; margin-top: 30px; border-collapse: collapse; }
+          .items-table th { background: #f8f9fa; padding: 10px; text-align: left; border-bottom: 2px solid #ddd; }
+          .totals { margin-top: 30px; width: 300px; margin-left: auto; }
+          .totals-row { display: flex; justify-content: space-between; padding: 6px 0; }
+          .grand-total { font-size: 18px; font-weight: bold; color: #004488; border-top: 2px solid #004488; padding-top: 10px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <div class="title">Elite Central Vacuum</div>
+            <div>123 Elite Plaza, Wellness Drive</div>
+            <div>Greenwich, CT 06830</div>
+            <div>support@elitecentralvac.com</div>
+          </div>
+          <div style="text-align: right;">
+            <h2>INVOICE</h2>
+            <div><strong>Invoice #:</strong> ${invoice.businessId}</div>
+            <div><strong>Status:</strong> ${invoice.status}</div>
+            <div><strong>Issue Date:</strong> ${new Date(invoice.issueDate).toLocaleDateString()}</div>
+            <div><strong>Due Date:</strong> ${new Date(invoice.dueDate).toLocaleDateString()}</div>
+          </div>
+        </div>
+
+        <div style="margin-top: 30px;">
+          <strong>Billed To:</strong><br/>
+          ${invoice.customer.displayName}<br/>
+          ${invoice.customer.email}<br/>
+          ${invoice.customer.phone || ''}
+        </div>
+
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th style="text-align: center;">Qty</th>
+              <th style="text-align: right;">Unit Price</th>
+              <th style="text-align: right;">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${lineItemsHtml}
+          </tbody>
+        </table>
+
+        <div class="totals">
+          <div class="totals-row">
+            <span>Subtotal:</span>
+            <span>$${Number(invoice.subtotalUsd).toFixed(2)}</span>
+          </div>
+          <div class="totals-row">
+            <span>Discount:</span>
+            <span>-$${Number(invoice.discountUsd).toFixed(2)}</span>
+          </div>
+          <div class="totals-row">
+            <span>Tax:</span>
+            <span>$${Number(invoice.taxUsd).toFixed(2)}</span>
+          </div>
+          <div class="totals-row grand-total">
+            <span>Total USD:</span>
+            <span>$${Number(invoice.totalUsd).toFixed(2)}</span>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    return html;
+  }
+}
