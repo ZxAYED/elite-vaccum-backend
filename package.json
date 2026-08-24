@@ -19,7 +19,7 @@
     "debug": "nest start --debug --watch",
     "prod": "node dist/main",
     "typecheck": "tsc -p tsconfig.json --noEmit --incremental false",
-    "seed": "ts-node prisma/seed.ts",
+    "seed": "ts-node -r dotenv/config prisma/seed.ts",
     "generate": "prisma generate",
     "migrate:dev": "prisma migrate dev",
     "studio": "prisma studio",

@@ -1,269 +1,168 @@
 import 'dotenv/config';
+import { PrismaClient, UserRole, TechnicianStatus, CustomerStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
-import * as fs from 'fs';
-import * as path from 'path';
-import { execFileSync } from 'child_process';
 
-const tempSqlPath = path.join(__dirname, 'seed.generated.sql');
-
-function sqlString(value: string | null) {
-  if (value === null) {
-    return 'NULL';
-  }
-
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
-function buildSeedSql(params: {
-  adminPasswordHash: string;
-  techPasswordHash: string;
-  adminEmail: string;
-  techEmail: string;
-}) {
-  const {
-    adminPasswordHash,
-    techPasswordHash,
-    adminEmail,
-    techEmail,
-  } = params;
-
-  return `
-BEGIN;
-
-WITH admin_user AS (
-  INSERT INTO "User" (
-    "id",
-    "email",
-    "passwordHash",
-    "role",
-    "status",
-    "fullName",
-    "phone",
-    "cellphone",
-    "companyName",
-    "notes",
-    "isEmailVerified",
-    "isDeleted",
-    "createdAt",
-    "updatedAt"
-  )
-  VALUES (
-    'seed-admin-user',
-    ${sqlString(adminEmail)},
-    ${sqlString(adminPasswordHash)},
-    'ADMIN',
-    'ACTIVE',
-    'Elite Admin',
-    '+1-555-100-1000',
-    '+1-555-100-1001',
-    'Elite Central Vacuum',
-    'Default seeded administrator account.',
-    true,
-    false,
-    NOW(),
-    NOW()
-  )
-  ON CONFLICT ("email") DO UPDATE SET
-    "passwordHash" = EXCLUDED."passwordHash",
-    "role" = EXCLUDED."role",
-    "status" = EXCLUDED."status",
-    "fullName" = EXCLUDED."fullName",
-    "phone" = EXCLUDED."phone",
-    "cellphone" = EXCLUDED."cellphone",
-    "companyName" = EXCLUDED."companyName",
-    "notes" = EXCLUDED."notes",
-    "isEmailVerified" = EXCLUDED."isEmailVerified",
-    "isDeleted" = EXCLUDED."isDeleted",
-    "updatedAt" = NOW()
-  RETURNING "id"
-)
-INSERT INTO "AdminProfile" (
-  "id",
-  "userId",
-  "avatarUrl",
-  "bio",
-  "createdAt",
-  "updatedAt"
-)
-VALUES (
-  'seed-admin-profile',
-  (SELECT "id" FROM admin_user),
-  NULL,
-  'Default seeded administrator account.',
-  NOW(),
-  NOW()
-)
-ON CONFLICT ("userId") DO UPDATE SET
-  "bio" = EXCLUDED."bio",
-  "updatedAt" = NOW();
-
-WITH technician_user AS (
-  INSERT INTO "User" (
-    "id",
-    "email",
-    "passwordHash",
-    "role",
-    "status",
-    "fullName",
-    "phone",
-    "cellphone",
-    "companyName",
-    "notes",
-    "isEmailVerified",
-    "isDeleted",
-    "createdAt",
-    "updatedAt"
-  )
-  VALUES (
-    'seed-tech-user',
-    ${sqlString(techEmail)},
-    ${sqlString(techPasswordHash)},
-    'TECHNICIAN',
-    'ACTIVE',
-    'Elite Technician',
-    '+1-555-200-2000',
-    '+1-555-200-2001',
-    NULL,
-    'Default seeded technician account.',
-    true,
-    false,
-    NOW(),
-    NOW()
-  )
-  ON CONFLICT ("email") DO UPDATE SET
-    "passwordHash" = EXCLUDED."passwordHash",
-    "role" = EXCLUDED."role",
-    "status" = EXCLUDED."status",
-    "fullName" = EXCLUDED."fullName",
-    "phone" = EXCLUDED."phone",
-    "cellphone" = EXCLUDED."cellphone",
-    "companyName" = EXCLUDED."companyName",
-    "notes" = EXCLUDED."notes",
-    "isEmailVerified" = EXCLUDED."isEmailVerified",
-    "isDeleted" = EXCLUDED."isDeleted",
-    "updatedAt" = NOW()
-  RETURNING "id"
-),
-technician_profile AS (
-  INSERT INTO "TechnicianProfile" (
-    "id",
-    "userId",
-    "status",
-    "avatarUrl",
-    "bio",
-    "isVerified",
-    "availabilityNote",
-    "documents",
-    "createdAt",
-    "updatedAt"
-  )
-  VALUES (
-    'seed-tech-profile',
-    (SELECT "id" FROM technician_user),
-    'ACTIVE',
-    NULL,
-    'Default seeded technician account.',
-    true,
-    'Available for service scheduling.',
-    NULL,
-    NOW(),
-    NOW()
-  )
-  ON CONFLICT ("userId") DO UPDATE SET
-    "status" = EXCLUDED."status",
-    "bio" = EXCLUDED."bio",
-    "isVerified" = EXCLUDED."isVerified",
-    "availabilityNote" = EXCLUDED."availabilityNote",
-    "updatedAt" = NOW()
-  RETURNING "id"
-),
-repair_spec AS (
-  INSERT INTO "TechnicianSpecialization" (
-    "id",
-    "name",
-    "createdAt",
-    "updatedAt"
-  )
-  VALUES (
-    'seed-tech-spec-repair',
-    'Central Vacuum Repair',
-    NOW(),
-    NOW()
-  )
-  ON CONFLICT ("name") DO UPDATE SET
-    "updatedAt" = NOW()
-  RETURNING "id"
-),
-install_spec AS (
-  INSERT INTO "TechnicianSpecialization" (
-    "id",
-    "name",
-    "createdAt",
-    "updatedAt"
-  )
-  VALUES (
-    'seed-tech-spec-installation',
-    'Installation',
-    NOW(),
-    NOW()
-  )
-  ON CONFLICT ("name") DO UPDATE SET
-    "updatedAt" = NOW()
-  RETURNING "id"
-)
-INSERT INTO "_TechnicianProfileToTechnicianSpecialization" ("A", "B")
-VALUES
-  ((SELECT "id" FROM technician_profile), (SELECT "id" FROM repair_spec)),
-  ((SELECT "id" FROM technician_profile), (SELECT "id" FROM install_spec))
-ON CONFLICT DO NOTHING;
-
-COMMIT;
-`;
-}
+const prisma = new PrismaClient();
 
 async function main() {
-  const adminEmail =
-    process.env.SEED_ADMIN_EMAIL?.trim().toLowerCase() ??
-    'admin@elitecentralvacuum.com';
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? 'Admin123!';
-  const techEmail =
-    process.env.SEED_TECH_EMAIL?.trim().toLowerCase() ??
-    'tech@elitecentralvacuum.com';
-  const techPassword = process.env.SEED_TECH_PASSWORD ?? 'Tech123!';
+  console.log('🌱 Starting database seed (Pure JS/Prisma Client)...');
 
-  const adminPasswordHash = await bcrypt.hash(adminPassword, 12);
-  const techPasswordHash = await bcrypt.hash(techPassword, 12);
+  const defaultPassword = process.env.SEED_DEFAULT_PASSWORD || 'Password123!';
+  const saltRounds = 10;
+  const passwordHash = await bcrypt.hash(defaultPassword, saltRounds);
 
-  const sql = buildSeedSql({
-    adminPasswordHash,
-    techPasswordHash,
-    adminEmail,
-    techEmail,
+  // ==========================================
+  // 1. SEED ADMIN USER
+  // ==========================================
+  const adminEmail = (process.env.ADMIN_EMAIL || 'admin@elitecentralvac.com').toLowerCase();
+  const admin = await prisma.user.upsert({
+    where: { email: adminEmail },
+    update: {
+      role: UserRole.ADMIN,
+      isActive: true,
+      emailVerifiedAt: new Date(),
+      firstName: 'Elite',
+      lastName: 'Admin',
+      phone: '+1-555-100-1000',
+    },
+    create: {
+      email: adminEmail,
+      passwordHash,
+      role: UserRole.ADMIN,
+      firstName: 'Elite',
+      lastName: 'Admin',
+      phone: '+1-555-100-1000',
+      isActive: true,
+      emailVerifiedAt: new Date(),
+    },
+  });
+  console.log(`✅ Seeded Admin: ${admin.email} (Role: ${admin.role})`);
+
+  // ==========================================
+  // 2. SEED CUSTOMER USER
+  // ==========================================
+  const customerEmail = (process.env.CUSTOMER_EMAIL || 'customer@elitecentralvac.com').toLowerCase();
+  const customerUser = await prisma.user.upsert({
+    where: { email: customerEmail },
+    update: {
+      role: UserRole.CUSTOMER,
+      isActive: true,
+      emailVerifiedAt: new Date(),
+      firstName: 'John',
+      lastName: 'Customer',
+      phone: '+1-555-200-2000',
+    },
+    create: {
+      email: customerEmail,
+      passwordHash,
+      role: UserRole.CUSTOMER,
+      firstName: 'John',
+      lastName: 'Customer',
+      phone: '+1-555-200-2000',
+      isActive: true,
+      emailVerifiedAt: new Date(),
+    },
   });
 
-  fs.writeFileSync(tempSqlPath, sql, 'utf8');
+  await prisma.customer.upsert({
+    where: { userId: customerUser.id },
+    update: {
+      displayName: 'John Customer',
+      firstName: 'John',
+      lastName: 'Customer',
+      email: customerEmail,
+      phone: '+1-555-200-2000',
+      status: CustomerStatus.ACTIVE,
+    },
+    create: {
+      userId: customerUser.id,
+      displayName: 'John Customer',
+      firstName: 'John',
+      lastName: 'Customer',
+      email: customerEmail,
+      phone: '+1-555-200-2000',
+      status: CustomerStatus.ACTIVE,
+    },
+  });
+  console.log(`✅ Seeded Customer: ${customerUser.email} (Role: ${customerUser.role})`);
 
-  try {
-    execFileSync(
-      'cmd',
-      ['/c', 'npx', 'prisma', 'db', 'execute', '--schema', 'prisma/schema', '--file', tempSqlPath],
-      {
-        cwd: path.resolve(__dirname, '..'),
-        stdio: 'inherit',
-      },
-    );
-  } finally {
-    if (fs.existsSync(tempSqlPath)) {
-      fs.unlinkSync(tempSqlPath);
-    }
-  }
+  // ==========================================
+  // 3. SEED TECHNICIAN USER
+  // ==========================================
+  const techEmail = (process.env.TECH_EMAIL || 'technician@elitecentralvac.com').toLowerCase();
+  const techUser = await prisma.user.upsert({
+    where: { email: techEmail },
+    update: {
+      role: UserRole.TECHNICIAN,
+      isActive: true,
+      emailVerifiedAt: new Date(),
+      firstName: 'Dave',
+      lastName: 'MasterTech',
+      phone: '+1-555-300-3000',
+    },
+    create: {
+      email: techEmail,
+      passwordHash,
+      role: UserRole.TECHNICIAN,
+      firstName: 'Dave',
+      lastName: 'MasterTech',
+      phone: '+1-555-300-3000',
+      isActive: true,
+      emailVerifiedAt: new Date(),
+    },
+  });
 
-  console.log('Seed complete');
-  console.log(`Admin: ${adminEmail}`);
-  console.log(`Technician: ${techEmail}`);
+  await prisma.technician.upsert({
+    where: { userId: techUser.id },
+    update: {
+      displayName: 'Dave MasterTech',
+      email: techEmail,
+      phone: '+1-555-300-3000',
+      status: TechnicianStatus.ACTIVE,
+      rating: 4.95,
+      completedJobs: 42,
+      isVerified: true,
+      specializations: [
+        'VACUUM_REPAIR',
+        'INSTALLATION',
+        'PIPE_UNCLOGGING',
+        'MOTOR_NOISE_DIAGNOSTICS',
+      ],
+      adminNotes: 'Senior Field Technician certified for Elite Central Vacuum systems.',
+    },
+    create: {
+      userId: techUser.id,
+      displayName: 'Dave MasterTech',
+      email: techEmail,
+      phone: '+1-555-300-3000',
+      status: TechnicianStatus.ACTIVE,
+      rating: 4.95,
+      completedJobs: 42,
+      isVerified: true,
+      specializations: [
+        'VACUUM_REPAIR',
+        'INSTALLATION',
+        'PIPE_UNCLOGGING',
+        'MOTOR_NOISE_DIAGNOSTICS',
+      ],
+      adminNotes: 'Senior Field Technician certified for Elite Central Vacuum systems.',
+    },
+  });
+  console.log(`✅ Seeded Technician: ${techUser.email} (Role: ${techUser.role})`);
+
+  console.log('\n🎉 Seeding completed successfully!');
+  console.log('----------------------------------------------------');
+  console.log(`Admin Login:      ${adminEmail} / ${defaultPassword}`);
+  console.log(`Customer Login:   ${customerEmail} / ${defaultPassword}`);
+  console.log(`Technician Login: ${techEmail} / ${defaultPassword}`);
+  console.log('----------------------------------------------------');
 }
 
-main().catch((error) => {
-  console.error('Seed failed', error);
-  process.exitCode = 1;
-});
+main()
+  .catch((e) => {
+    console.error('❌ Seeding failed:', e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
