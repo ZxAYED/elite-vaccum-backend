@@ -15,6 +15,7 @@ import { RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { generateBusinessId } from 'src/common/utils/business-id.util';
 import { getPagination } from 'src/common/utils/pagination';
 import { PrismaService } from 'src/prisma/prisma.service';
+import Stripe from 'stripe';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import {
   InvoiceListQueryDto,
@@ -26,8 +27,19 @@ import {
 @Injectable()
 export class BillingService {
   private readonly logger = new Logger(BillingService.name);
+  private stripe: Stripe | null = null;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {
+    const stripeKey = process.env.STRIPE_SECRET_KEY;
+    if (stripeKey && stripeKey.trim().length > 0 && !stripeKey.includes('...')) {
+      this.stripe = new Stripe(stripeKey);
+      this.logger.log('Stripe initialized for billing');
+    } else {
+      this.logger.warn(
+        'STRIPE_SECRET_KEY is unconfigured. Service invoice payments will operate in preview/mock mode.',
+      );
+    }
+  }
 
   private isAdmin(user?: RequestUser | null) {
     return user?.role === UserRole.ADMIN;
@@ -504,4 +516,98 @@ export class BillingService {
 
     return html;
   }
+
+  // ==========================================
+  // ONLINE STRIPE INVOICE PAYMENTS
+  // ==========================================
+
+  async createStripePaymentIntent(id: string, user: RequestUser) {
+    const invoice = await this.findOne(id, user);
+
+    if (invoice.status === InvoiceStatus.PAID) {
+      throw new BadRequestException('Invoice is already fully paid');
+    }
+
+    const existingPaid = invoice.payments
+      .filter((p) => p.status === PaymentStatus.SUCCEEDED)
+      .reduce((sum, p) => sum + Number(p.amountUsd), 0);
+
+    const totalUsd = Number(invoice.totalUsd);
+    const remainingBalance = Math.max(0, totalUsd - existingPaid);
+
+    if (remainingBalance <= 0) {
+      throw new BadRequestException('Invoice has no outstanding balance');
+    }
+
+    const amountInCents = Math.round(remainingBalance * 100);
+
+    if (this.stripe) {
+      const paymentIntent = await this.stripe.paymentIntents.create({
+        amount: amountInCents,
+        currency: 'usd',
+        metadata: {
+          invoiceId: invoice.id,
+          businessId: invoice.businessId,
+          customerId: invoice.customerId,
+          customerEmail: invoice.customer.email,
+        },
+        automatic_payment_methods: {
+          enabled: true,
+        },
+      });
+
+      return {
+        success: true,
+        clientSecret: paymentIntent.client_secret,
+        paymentIntentId: paymentIntent.id,
+        amountUsd: remainingBalance,
+        currency: 'usd',
+        invoiceBusinessId: invoice.businessId,
+      };
+    }
+
+    // Mock fallback when Stripe key is not provided in local dev
+    return {
+      success: true,
+      mockMode: true,
+      clientSecret: `pi_mock_secret_${Date.now()}`,
+      paymentIntentId: `pi_mock_${Date.now()}`,
+      amountUsd: remainingBalance,
+      currency: 'usd',
+      invoiceBusinessId: invoice.businessId,
+      message: 'Stripe running in development preview mode. Pass STRIPE_SECRET_KEY in .env for live processing.',
+    };
+  }
+
+  async confirmStripePayment(
+    id: string,
+    paymentIntentId: string,
+    user: RequestUser,
+  ) {
+    const invoice = await this.findOne(id, user);
+
+    let amountPaid = Number(invoice.totalUsd);
+    let transactionReference = paymentIntentId;
+
+    if (this.stripe && !paymentIntentId.startsWith('pi_mock_')) {
+      const intent = await this.stripe.paymentIntents.retrieve(paymentIntentId);
+      if (intent.status !== 'succeeded') {
+        throw new BadRequestException(`Stripe PaymentIntent is in '${intent.status}' state, not succeeded`);
+      }
+      amountPaid = intent.amount_received / 100;
+      transactionReference = intent.id;
+    }
+
+    return this.recordPayment(
+      id,
+      {
+        amountUsd: amountPaid,
+        methodLabel: 'Stripe',
+        transactionReference,
+        status: PaymentStatus.SUCCEEDED,
+      },
+      user,
+    );
+  }
 }
+

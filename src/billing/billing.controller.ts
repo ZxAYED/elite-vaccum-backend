@@ -121,4 +121,27 @@ export class BillingController {
   ) {
     return this.billingService.recordRefund(id, dto, user);
   }
+
+  @Post(':id/stripe/payment-intent')
+  @Roles('CUSTOMER', 'ADMIN')
+  @ApiOperation({ summary: 'Customer / Admin: Create Stripe PaymentIntent for online invoice payment' })
+  @ApiResponse({ status: 200, description: 'Stripe PaymentIntent client secret created' })
+  async createStripePaymentIntent(
+    @Param('id') id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.billingService.createStripePaymentIntent(id, user);
+  }
+
+  @Post(':id/stripe/confirm')
+  @Roles('CUSTOMER', 'ADMIN')
+  @ApiOperation({ summary: 'Customer / Admin: Confirm successful Stripe PaymentIntent and mark invoice paid' })
+  @ApiResponse({ status: 200, description: 'Payment recorded and invoice updated' })
+  async confirmStripePayment(
+    @Param('id') id: string,
+    @Body('paymentIntentId') paymentIntentId: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.billingService.confirmStripePayment(id, paymentIntentId, user);
+  }
 }

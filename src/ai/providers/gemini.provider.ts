@@ -8,25 +8,28 @@ import { GoogleGenAI } from '@google/genai';
 
 @Injectable()
 export class GeminiProvider {
-  private readonly client: GoogleGenAI;
+  private readonly client: GoogleGenAI | null = null;
   private readonly model: string;
 
   constructor(private readonly configService: ConfigService) {
     const apiKey = this.configService.get<string>('GEMINI_API_KEY');
 
-    if (!apiKey) {
-      throw new Error('GEMINI_API_KEY is not configured');
+    if (apiKey && apiKey.trim().length > 0 && !apiKey.includes('...')) {
+      this.client = new GoogleGenAI({
+        apiKey,
+      });
     }
 
-    this.client = new GoogleGenAI({
-      apiKey,
-    });
-
     this.model =
-      this.configService.get<string>('GEMINI_MODEL') ?? 'gemini-3.6-flash';
+      this.configService.get<string>('GEMINI_MODEL') ?? 'gemini-2.5-flash';
   }
 
   async generateText(message: string): Promise<string> {
+    if (!this.client) {
+      throw new ServiceUnavailableException(
+        'GEMINI_API_KEY is not configured in .env',
+      );
+    }
     try {
       const interaction = await this.client.interactions.create({
         model: this.model,
@@ -62,6 +65,11 @@ export class GeminiProvider {
     }
   }
   async *streamText(message: string): AsyncGenerator<string> {
+    if (!this.client) {
+      throw new ServiceUnavailableException(
+        'GEMINI_API_KEY is not configured in .env',
+      );
+    }
     try {
       const stream = await this.client.interactions.create({
         model: this.model,
@@ -98,6 +106,11 @@ export class GeminiProvider {
     input: string;
     schema: Record<string, unknown>;
   }): Promise<T> {
+    if (!this.client) {
+      throw new ServiceUnavailableException(
+        'GEMINI_API_KEY is not configured in .env',
+      );
+    }
     try {
       const interaction = await this.client.interactions.create({
         model: this.model,
