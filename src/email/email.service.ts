@@ -16,12 +16,14 @@ export class EmailService {
   constructor(private readonly configService: ConfigService) {}
 
   private createTransporter() {
-    const smtpUser =
+    const rawUser =
       this.configService.get<string>('SMTP_USER') ||
       this.configService.get<string>('AWS_SES_SMTP_USER');
-    const smtpPass =
+    const rawPass =
       this.configService.get<string>('SMTP_PASS') ||
       this.configService.get<string>('AWS_SES_SMTP_PASS');
+    const smtpUser = rawUser?.trim();
+    const smtpPass = rawPass?.replace(/\s+/g, '');
     const smtpHost =
       this.configService.get<string>('SMTP_HOST') ||
       this.configService.get<string>('AWS_SES_SMTP_HOST') ||
