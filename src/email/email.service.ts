@@ -16,14 +16,24 @@ export class EmailService {
   constructor(private readonly configService: ConfigService) {}
 
   private createTransporter() {
-    const smtpUser = this.configService.get<string>('AWS_SES_SMTP_USER');
-    const smtpPass = this.configService.get<string>('AWS_SES_SMTP_PASS');
+    const smtpUser =
+      this.configService.get<string>('SMTP_USER') ||
+      this.configService.get<string>('AWS_SES_SMTP_USER');
+    const smtpPass =
+      this.configService.get<string>('SMTP_PASS') ||
+      this.configService.get<string>('AWS_SES_SMTP_PASS');
     const smtpHost =
-      this.configService.get<string>('AWS_SES_SMTP_HOST') ??
-      'email-smtp.us-east-1.amazonaws.com';
+      this.configService.get<string>('SMTP_HOST') ||
+      this.configService.get<string>('AWS_SES_SMTP_HOST') ||
+      'smtp.gmail.com';
     const smtpPort = Number(
-      this.configService.get<string>('AWS_SES_SMTP_PORT') ?? 587,
+      this.configService.get<string>('SMTP_PORT') ||
+      this.configService.get<string>('AWS_SES_SMTP_PORT') ||
+      '587',
     );
+    const smtpSecure =
+      this.configService.get<string>('SMTP_SECURE') === 'true' ||
+      smtpPort === 465;
 
     if (!smtpUser || !smtpPass || Number.isNaN(smtpPort)) {
       return null;
@@ -33,24 +43,27 @@ export class EmailService {
       transporter: nodemailer.createTransport({
         host: smtpHost,
         port: smtpPort,
-        secure: false,
+        secure: smtpSecure,
         auth: {
           user: smtpUser,
           pass: smtpPass,
         },
       }),
       defaultFrom:
-        this.configService.get<string>('AWS_SES_FROM_EMAIL') ?? smtpUser,
+        this.configService.get<string>('SMTP_FROM_EMAIL') ||
+        this.configService.get<string>('AWS_SES_FROM_EMAIL') ||
+        smtpUser,
     };
   }
 
   async sendEmail(input: SendEmailInput): Promise<EmailSendResult> {
     const mailer = this.createTransporter();
     if (!mailer) {
+      this.logger.warn('SMTP credentials unconfigured. Email dispatch skipped.');
       return {
         success: false,
         skipped: true,
-        error: 'AWS SES SMTP configuration missing',
+        error: 'SMTP configuration missing in .env (SMTP_USER / SMTP_PASS)',
       };
     }
 
