@@ -6,15 +6,22 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFiles,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
+  ApiConsumes,
   ApiOperation,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { plainToInstance } from 'class-transformer';
+import { validateOrReject } from 'class-validator';
 import { CurrentUser, RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { Public, Roles } from 'src/common/decorator/rolesDecorator';
+import { extractMultipartJsonPayload } from 'src/common/utils/parseJsonPayload';
 import { AddServiceRequestAttachmentDto } from './dto/add-service-request-attachment.dto';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { RejectServiceRequestDto } from './dto/reject-service-request.dto';
@@ -29,17 +36,26 @@ export class ServiceRequestsController {
 
   @Post()
   @Public()
+  @UseInterceptors(FilesInterceptor('attachments', 10))
+  @ApiConsumes('multipart/form-data', 'application/json')
   @ApiOperation({
-    summary: 'Submit customer service intake request',
+    summary: 'Submit customer service intake request with direct file uploads',
     description:
-      'Submits an intake service request. Auto-provisions guest customer lead or links authenticated customer account. Generates REQ-XXXXX business ID.',
+      'Submits an intake service request. Accepts direct image/video/doc file uploads in "attachments" or "files" field, auto-uploads them to Cloudinary, and saves all attributes into the database. Auto-provisions guest customer lead or links authenticated customer account.',
   })
   @ApiResponse({ status: 201, description: 'Service intake request created' })
   async createRequest(
-    @Body() dto: CreateServiceRequestDto,
+    @Body() rawBody: any,
+    @UploadedFiles() files?: Array<Express.Multer.File>,
     @CurrentUser() user?: RequestUser | null,
   ) {
-    return this.serviceRequestsService.createRequest(dto, user);
+    const payload = extractMultipartJsonPayload<CreateServiceRequestDto>(rawBody);
+    const dto = plainToInstance(CreateServiceRequestDto, payload);
+    await validateOrReject(dto, {
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    });
+    return this.serviceRequestsService.createRequest(dto, files, user);
   }
 
   @Get('me')
@@ -119,16 +135,21 @@ export class ServiceRequestsController {
 
   @Post(':id/attachments')
   @ApiBearerAuth('JWT-auth')
+  @UseInterceptors(FilesInterceptor('attachments', 10))
+  @ApiConsumes('multipart/form-data', 'application/json')
   @ApiOperation({
-    summary: 'Append media attachments to an active service request',
-    description: 'Upload and attach photos, videos, or documents to an existing service request.',
+    summary: 'Append media attachments or upload files directly to an active service request',
+    description: 'Upload and attach photos, videos, or documents directly to Cloudinary and attach to service request.',
   })
   @ApiResponse({ status: 200, description: 'Attachments added successfully' })
   async addAttachments(
     @Param('id') id: string,
-    @Body() dto: AddServiceRequestAttachmentDto,
+    @Body() rawBody: any,
+    @UploadedFiles() files?: Array<Express.Multer.File>,
     @CurrentUser() user?: RequestUser | null,
   ) {
-    return this.serviceRequestsService.addAttachments(id, dto, user);
+    const payload = extractMultipartJsonPayload<AddServiceRequestAttachmentDto>(rawBody);
+    const dto = plainToInstance(AddServiceRequestAttachmentDto, payload);
+    return this.serviceRequestsService.addAttachments(id, dto, files, user);
   }
 }

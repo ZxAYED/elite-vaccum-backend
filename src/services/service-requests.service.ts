@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AttachmentKind,
   CustomerStatus,
   Prisma,
   RequestUrgency,
@@ -18,6 +19,7 @@ import { RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { generateBusinessId } from 'src/common/utils/business-id.util';
 import { getPagination } from 'src/common/utils/pagination';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { CloudinaryUploadService } from 'src/storage/cloudinary-upload.service';
 import { FIXED_SERVICES_CATALOG } from './constants/services-catalog.constant';
 import { AddServiceRequestAttachmentDto } from './dto/add-service-request-attachment.dto';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
@@ -29,7 +31,43 @@ import { UpdateServiceRequestStatusDto } from './dto/update-service-request-stat
 export class ServiceRequestsService {
   private readonly logger = new Logger(ServiceRequestsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cloudinary: CloudinaryUploadService,
+  ) {}
+
+  private async uploadMulterFiles(
+    files: Array<Express.Multer.File>,
+    folder = 'elite-vacuum/service-requests',
+  ) {
+    if (!files || files.length === 0) return [];
+    return Promise.all(
+      files.map(async (file) => {
+        const uploaded = await this.cloudinary.uploadFile({
+          fileBuffer: file.buffer,
+          originalName: file.originalname,
+          mimeType: file.mimetype,
+          folder,
+        });
+
+        const kind = file.mimetype.startsWith('image')
+          ? AttachmentKind.PHOTO
+          : file.mimetype.startsWith('video')
+            ? AttachmentKind.VIDEO
+            : AttachmentKind.DOCUMENT;
+
+        return {
+          fileName: file.originalname,
+          fileType: file.mimetype,
+          sizeBytes: file.size,
+          url: uploaded.url,
+          kind,
+          category: 'Issue Attachment',
+          note: null as string | null,
+        };
+      }),
+    );
+  }
 
   private isAdmin(user?: RequestUser | null): boolean {
     return user?.role === UserRole.ADMIN;
@@ -201,11 +239,22 @@ export class ServiceRequestsService {
 
   async createRequest(
     dto: CreateServiceRequestDto,
+    files?: Array<Express.Multer.File>,
     user?: RequestUser | null,
   ) {
     const customerId = await this.resolveOrCreateCustomer(dto, user);
     const service = await this.resolveService(dto.serviceSlug);
     const businessId = await this.generateRequestBusinessId();
+
+    // Upload any multipart files to Cloudinary
+    const uploadedAttachments =
+      files && files.length > 0
+        ? await this.uploadMulterFiles(files)
+        : [];
+    const allAttachments = [
+      ...uploadedAttachments,
+      ...(dto.attachments || []),
+    ];
 
     const serviceAddressSnapshot = {
       address: dto.address.trim(),
@@ -267,10 +316,10 @@ export class ServiceRequestsService {
         });
       }
 
-      // 3. Create Attachments if provided
-      if (dto.attachments && dto.attachments.length > 0) {
+      // 3. Create Attachments if provided or uploaded
+      if (allAttachments.length > 0) {
         await tx.serviceRequestAttachment.createMany({
-          data: dto.attachments.map((att) => ({
+          data: allAttachments.map((att) => ({
             serviceRequestId: request.id,
             fileName: att.fileName.trim(),
             fileType: att.fileType.trim(),
@@ -550,17 +599,22 @@ export class ServiceRequestsService {
 
   async addAttachments(
     id: string,
-    dto: AddServiceRequestAttachmentDto,
+    dto?: AddServiceRequestAttachmentDto,
+    files?: Array<Express.Multer.File>,
     user?: RequestUser | null,
   ) {
     const request = await this.getRequestDetails(id, user);
 
-    if (dto.attachments.length === 0) {
-      throw new BadRequestException('No attachments provided');
+    const uploaded =
+      files && files.length > 0 ? await this.uploadMulterFiles(files) : [];
+    const allAttachments = [...uploaded, ...(dto?.attachments || [])];
+
+    if (allAttachments.length === 0) {
+      throw new BadRequestException('No attachments or files provided');
     }
 
     await this.prisma.serviceRequestAttachment.createMany({
-      data: dto.attachments.map((att) => ({
+      data: allAttachments.map((att) => ({
         serviceRequestId: request.id,
         fileName: att.fileName.trim(),
         fileType: att.fileType.trim(),

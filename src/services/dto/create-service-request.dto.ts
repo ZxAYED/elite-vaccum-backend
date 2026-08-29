@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AttachmentKind, RequestSymptom } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsEmail,
@@ -15,6 +15,7 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
+import { safeJsonParse } from 'src/common/utils/parseJsonPayload';
 
 export class ServiceRequestAttachmentInputDto {
   @ApiProperty({ example: 'damaged-inlet-valve.jpg' })
@@ -138,6 +139,7 @@ export class CreateServiceRequestDto {
     description: 'Selected symptom tags',
   })
   @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? safeJsonParse(value) : value))
   @IsArray()
   @IsEnum(RequestSymptom, { each: true })
   readonly symptoms?: RequestSymptom[];
@@ -166,9 +168,11 @@ export class CreateServiceRequestDto {
   // Photos & Videos
   @ApiPropertyOptional({
     type: [ServiceRequestAttachmentInputDto],
-    description: 'Attached photos, videos, or documents',
+    description:
+      'Attached photos, videos, or documents (or upload directly via attachments/files multipart fields)',
   })
   @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? safeJsonParse(value) : value))
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ServiceRequestAttachmentInputDto)
