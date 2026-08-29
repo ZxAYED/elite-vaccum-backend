@@ -2,92 +2,12 @@ import 'dotenv/config';
 import { ValidationPipe } from '@nestjs/common';
 import { HttpAdapterHost, NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import * as express from 'express';
-import { Request, Response, NextFunction } from 'express';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { ResponseEnvelopeInterceptor } from './common/interceptors/response-envelope.interceptor';
 
-function sanitizeJsonStringLiterals(jsonStr: string): string {
-  let inString = false;
-  let isEscaped = false;
-  let result = '';
-
-  for (let i = 0; i < jsonStr.length; i++) {
-    const char = jsonStr[i];
-
-    if (inString) {
-      if (isEscaped) {
-        result += char;
-        isEscaped = false;
-      } else if (char === '\\') {
-        result += char;
-        isEscaped = true;
-      } else if (char === '"') {
-        result += char;
-        inString = false;
-      } else if (char === '\n') {
-        result += '\\n';
-      } else if (char === '\r') {
-        result += '\\r';
-      } else if (char === '\t') {
-        result += '\\t';
-      } else if (char.charCodeAt(0) < 32) {
-        result += '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0');
-      } else {
-        result += char;
-      }
-    } else {
-      if (char === '"') {
-        inString = true;
-      }
-      result += char;
-    }
-  }
-
-  return result;
-}
-
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bodyParser: false });
-  
-  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-  app.use((req: Request, res: Response, next: NextFunction) => {
-    const contentType = req.headers['content-type'] || '';
-    if (
-      req.method !== 'GET' &&
-      req.method !== 'HEAD' &&
-      typeof contentType === 'string' &&
-      contentType.includes('application/json')
-    ) {
-      let rawData = '';
-      req.setEncoding('utf8');
-      req.on('data', (chunk) => {
-        rawData += chunk;
-      });
-      req.on('end', () => {
-        if (!rawData || !rawData.trim()) {
-          req.body = {};
-          return next();
-        }
-        try {
-          req.body = JSON.parse(rawData);
-          return next();
-        } catch {
-          try {
-            const sanitized = sanitizeJsonStringLiterals(rawData);
-            req.body = JSON.parse(sanitized);
-            return next();
-          } catch (err) {
-            return next(err);
-          }
-        }
-      });
-    } else {
-      next();
-    }
-  });
-
+  const app = await NestFactory.create(AppModule);
   app.enableCors({
     origin: ['http://localhost:5173', 'http://localhost:5174', '*'],
   });
