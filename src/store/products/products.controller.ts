@@ -120,7 +120,7 @@ export class StoreProductsController {
   @ApiConsumes('multipart/form-data', 'application/json')
   @ApiOperation({
     summary:
-      'Unified Update Product: edit fields, upload new images to S3, or delete existing images via deleteImageIds (Admin only)',
+      'Unified Update Product: edit fields, upload new images to Cloudinary, or delete existing images via deleteImageIds (Admin only)',
   })
   @ApiResponse({ status: 200, description: 'Product successfully updated' })
   @ApiResponse({ status: 404, description: 'Product not found' })

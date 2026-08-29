@@ -1,9 +1,10 @@
 import { Global, Module } from '@nestjs/common';
+import { CloudinaryUploadService } from './cloudinary-upload.service';
 import { S3UploadService } from './s3-upload.service';
 
 @Global()
 @Module({
-  providers: [S3UploadService],
-  exports: [S3UploadService],
+  providers: [CloudinaryUploadService, S3UploadService],
+  exports: [CloudinaryUploadService, S3UploadService],
 })
 export class StorageModule {}
