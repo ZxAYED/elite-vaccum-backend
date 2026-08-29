@@ -124,12 +124,11 @@ export class AuthService {
         ? 'Verify Your Email'
         : 'Password Reset OTP';
 
-    const message = `Your one-time code is ${otp}. It expires in 10 minutes.`;
-
-    await this.emailService.sendAccountEmail({
+    await this.emailService.sendOtpEmail({
       to: email,
+      otp,
+      validForMinutes: 10,
       subject: emailSubject,
-      message,
     });
   }
 
