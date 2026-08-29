@@ -37,6 +37,8 @@ export class ServiceRequestsController {
 
   @Post()
   @Public()
+  @ApiBearerAuth('JWT-auth')
+  @ApiBearerAuth('bearer')
   @UseInterceptors(FilesInterceptor('attachments', 10))
   @ApiConsumes('multipart/form-data', 'application/json')
   @ApiOperation({

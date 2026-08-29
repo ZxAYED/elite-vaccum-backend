@@ -35,14 +35,46 @@ export class AuthGuard implements CanActivate {
         context.getClass(),
       ]) ?? false;
 
-    if (isPublic) {
-      return true;
-    }
-
     type AuthenticatedRequest = Request & { user?: AuthenticatedRequestUser };
-
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const authorization = request.headers.authorization;
+
+    if (isPublic) {
+      if (authorization) {
+        try {
+          const rawToken = authorization.startsWith('Bearer ')
+            ? authorization.slice(7)
+            : authorization;
+          const verified = await this.jwtService.verifyAsync(rawToken);
+          if (verified && typeof verified === 'object') {
+            const payload = verified as Record<string, unknown>;
+            const userId = typeof payload.sub === 'string' ? payload.sub : null;
+            if (userId) {
+              const user = await this.prisma.user.findUnique({
+                where: { id: userId },
+                select: {
+                  id: true,
+                  email: true,
+                  role: true,
+                  isActive: true,
+                },
+              });
+              if (user && user.isActive) {
+                request.user = {
+                  id: user.id,
+                  email: user.email,
+                  role: user.role,
+                  isActive: user.isActive,
+                };
+              }
+            }
+          }
+        } catch {
+          // Ignore invalid token on public routes
+        }
+      }
+      return true;
+    }
 
     if (!authorization) {
       throw new UnauthorizedException('Unauthorized, no token provided');

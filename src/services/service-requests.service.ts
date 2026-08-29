@@ -93,17 +93,66 @@ export class ServiceRequestsService {
    * Resolves or provisions a Customer profile for an intake request.
    */
   private async resolveOrCreateCustomer(
-    dto: { fullName: string; email: string; phone: string; address?: string; city?: string; state?: string; zipCode?: string },
+    dto: {
+      fullName: string;
+      email?: string;
+      phone: string;
+      address?: string;
+      city?: string;
+      state?: string;
+      zipCode?: string;
+    },
     user?: RequestUser | null,
   ): Promise<string> {
-    const email = dto.email.trim().toLowerCase();
+    const email = (user?.email || dto.email || '').trim().toLowerCase();
+
+    if (!email) {
+      throw new BadRequestException(
+        'Email is required to submit a service request (or provide an authentication token)',
+      );
+    }
 
     if (user && user.id) {
-      const existing = await this.prisma.customer.findUnique({
+      const existingByUserId = await this.prisma.customer.findUnique({
         where: { userId: user.id },
         select: { id: true },
       });
-      if (existing) return existing.id;
+      if (existingByUserId) return existingByUserId.id;
+
+      const existingByEmail = await this.prisma.customer.findFirst({
+        where: { email },
+      });
+      if (existingByEmail) {
+        const updated = await this.prisma.customer.update({
+          where: { id: existingByEmail.id },
+          data: {
+            userId: user.id,
+            status: CustomerStatus.ACTIVE,
+            phone: dto.phone.trim(),
+            displayName: dto.fullName.trim(),
+          },
+          select: { id: true },
+        });
+        return updated.id;
+      }
+
+      const parts = dto.fullName.trim().split(' ');
+      const firstName = parts[0] || 'Customer';
+      const lastName = parts.slice(1).join(' ') || '';
+
+      const created = await this.prisma.customer.create({
+        data: {
+          userId: user.id,
+          displayName: dto.fullName.trim(),
+          firstName,
+          lastName,
+          email,
+          phone: dto.phone.trim(),
+          status: CustomerStatus.ACTIVE,
+        },
+        select: { id: true },
+      });
+      return created.id;
     }
 
     const byEmail = await this.prisma.customer.findFirst({
@@ -256,6 +305,8 @@ export class ServiceRequestsService {
       ...(dto.attachments || []),
     ];
 
+    const effectiveEmail = (user?.email || dto.email || '').trim().toLowerCase();
+
     const serviceAddressSnapshot = {
       address: dto.address.trim(),
       city: dto.city.trim(),
@@ -264,7 +315,7 @@ export class ServiceRequestsService {
       problemLocation: dto.problemLocation?.trim() || null,
       contactName: dto.fullName.trim(),
       contactPhone: dto.phone.trim(),
-      contactEmail: dto.email.trim(),
+      contactEmail: effectiveEmail,
     };
 
     const requestedScheduleSnapshot = {
@@ -354,10 +405,22 @@ export class ServiceRequestsService {
     query: ServiceRequestListQueryDto,
     user: RequestUser,
   ) {
-    const customer = await this.prisma.customer.findUnique({
-      where: { userId: user.id },
-      select: { id: true },
+    const userEmail = user.email.trim().toLowerCase();
+    let customer = await this.prisma.customer.findFirst({
+      where: {
+        OR: [
+          { userId: user.id },
+          { email: userEmail },
+        ],
+      },
     });
+
+    if (customer && !customer.userId) {
+      customer = await this.prisma.customer.update({
+        where: { id: customer.id },
+        data: { userId: user.id, status: CustomerStatus.ACTIVE },
+      });
+    }
 
     if (!customer) {
       return {

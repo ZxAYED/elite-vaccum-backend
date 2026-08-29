@@ -70,9 +70,13 @@ export class CreateServiceRequestDto {
   @MaxLength(100)
   readonly fullName!: string;
 
-  @ApiProperty({ example: 'jane.doe@example.com', description: 'Customer email' })
+  @ApiPropertyOptional({
+    example: 'customer@elitecentralvac.com',
+    description: 'Customer email (auto-populated from JWT token if logged in)',
+  })
+  @IsOptional()
   @IsEmail()
-  readonly email!: string;
+  readonly email?: string;
 
   @ApiProperty({ example: '+1 (555) 234-5678', description: 'Customer contact phone number' })
   @IsString()
