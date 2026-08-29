@@ -21,7 +21,7 @@ import {
 import { plainToInstance } from 'class-transformer';
 import { validateOrReject } from 'class-validator';
 import { CurrentUser, RequestUser } from 'src/common/decorator/currentUser.decorator';
-import { Public, Roles } from 'src/common/decorator/rolesDecorator';
+import { Roles } from 'src/common/decorator/rolesDecorator';
 import { extractMultipartJsonPayload } from 'src/common/utils/parseJsonPayload';
 import { AddServiceRequestAttachmentDto } from './dto/add-service-request-attachment.dto';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
@@ -31,20 +31,20 @@ import { UpdateServiceRequestStatusDto } from './dto/update-service-request-stat
 import { ServiceRequestsService } from './service-requests.service';
 
 @ApiTags('Services - Requests & Intake')
+@ApiBearerAuth('JWT-auth')
+@ApiBearerAuth('bearer')
 @Controller('service-requests')
 export class ServiceRequestsController {
   constructor(private readonly serviceRequestsService: ServiceRequestsService) {}
 
   @Post()
-  @Public()
-  @ApiBearerAuth('JWT-auth')
-  @ApiBearerAuth('bearer')
+  @Roles('CUSTOMER', 'ADMIN')
   @UseInterceptors(FilesInterceptor('attachments', 10))
   @ApiConsumes('multipart/form-data', 'application/json')
   @ApiOperation({
-    summary: 'Submit customer service intake request with direct file uploads',
+    summary: 'Submit customer service intake request (Authentication Required)',
     description:
-      'Submits an intake service request. In Swagger / Frontend, provide the request JSON in `data` and attach multiple photos/videos/docs in `attachments`. Files are automatically uploaded to Cloudinary.',
+      'Submits an intake service request for the authenticated user. Email and account linkage are automatically enforced from the session JWT token. Supports direct Cloudinary image/video/doc file attachments.',
   })
   @ApiBody({
     description: 'Service intake request with direct Cloudinary file attachments',
@@ -58,8 +58,7 @@ export class ServiceRequestsController {
             {
               serviceSlug: 'vacuum-repair',
               fullName: 'Jane Doe',
-              email: 'customer@elitecentralvac.com',
-              phone: '+1-555-234-5678',
+              phone: '+1 (555) 234-5678',
               address: '742 Evergreen Terrace',
               city: 'Springfield',
               state: 'OR',
@@ -95,8 +94,8 @@ export class ServiceRequestsController {
   @ApiResponse({ status: 201, description: 'Service intake request created' })
   async createRequest(
     @Body() rawBody: any,
+    @CurrentUser() user: RequestUser,
     @UploadedFiles() files?: Array<Express.Multer.File>,
-    @CurrentUser() user?: RequestUser | null,
   ) {
     const payload = extractMultipartJsonPayload<CreateServiceRequestDto>(rawBody);
     const dto = plainToInstance(CreateServiceRequestDto, payload);
@@ -108,8 +107,7 @@ export class ServiceRequestsController {
   }
 
   @Get('me')
-  @ApiBearerAuth('JWT-auth')
-  @Roles('CUSTOMER')
+  @Roles('CUSTOMER', 'ADMIN')
   @ApiOperation({
     summary: 'List requests submitted by logged-in customer',
     description: 'Returns all intake and active service requests belonging to the authenticated customer.',
@@ -123,7 +121,6 @@ export class ServiceRequestsController {
   }
 
   @Get()
-  @ApiBearerAuth('JWT-auth')
   @Roles('ADMIN')
   @ApiOperation({
     summary: 'Admin: Searchable & filterable triage list with live KPI badges',
@@ -136,7 +133,7 @@ export class ServiceRequestsController {
   }
 
   @Get(':id')
-  @ApiBearerAuth('JWT-auth')
+  @Roles('CUSTOMER', 'ADMIN', 'TECHNICIAN')
   @ApiOperation({
     summary: 'Get full service request details by UUID or REQ-XXXXX business ID',
     description: 'Returns equipment, attachments, schedule snapshot, and appointment history.',
@@ -145,13 +142,12 @@ export class ServiceRequestsController {
   @ApiResponse({ status: 404, description: 'Request not found' })
   async getRequestDetails(
     @Param('id') id: string,
-    @CurrentUser() user?: RequestUser | null,
+    @CurrentUser() user: RequestUser,
   ) {
     return this.serviceRequestsService.getRequestDetails(id, user);
   }
 
   @Patch(':id/status')
-  @ApiBearerAuth('JWT-auth')
   @Roles('ADMIN')
   @ApiOperation({
     summary: 'Admin: Transition service request status',
@@ -167,7 +163,6 @@ export class ServiceRequestsController {
   }
 
   @Post(':id/reject')
-  @ApiBearerAuth('JWT-auth')
   @Roles('ADMIN')
   @ApiOperation({
     summary: 'Admin: Reject service request with reason and comments',
@@ -183,7 +178,7 @@ export class ServiceRequestsController {
   }
 
   @Post(':id/attachments')
-  @ApiBearerAuth('JWT-auth')
+  @Roles('CUSTOMER', 'ADMIN')
   @UseInterceptors(FilesInterceptor('attachments', 10))
   @ApiConsumes('multipart/form-data', 'application/json')
   @ApiOperation({
@@ -215,8 +210,8 @@ export class ServiceRequestsController {
   async addAttachments(
     @Param('id') id: string,
     @Body() rawBody: any,
+    @CurrentUser() user: RequestUser,
     @UploadedFiles() files?: Array<Express.Multer.File>,
-    @CurrentUser() user?: RequestUser | null,
   ) {
     const payload = extractMultipartJsonPayload<AddServiceRequestAttachmentDto>(rawBody);
     const dto = plainToInstance(AddServiceRequestAttachmentDto, payload);
