@@ -38,6 +38,8 @@ export class ServiceRequestsController {
   constructor(private readonly serviceRequestsService: ServiceRequestsService) {}
 
   @Post()
+  @ApiBearerAuth('JWT-auth')
+  @ApiBearerAuth('bearer')
   @Roles('CUSTOMER', 'ADMIN')
   @UseInterceptors(FilesInterceptor('attachments', 10))
   @ApiConsumes('multipart/form-data', 'application/json')
