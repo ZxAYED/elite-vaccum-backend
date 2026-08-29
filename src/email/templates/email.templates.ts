@@ -6,21 +6,11 @@ import {
   type EmailTemplateRenderResult,
 } from '../types/email.types';
 
-export function getAppBaseUrl(): string {
-  return (
-    process.env.FRONTEND_URL ||
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.APP_URL ||
-    'http://localhost:5173'
-  ).replace(/\/$/, '');
+export function getFrontendUrl(): string {
+  return (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
 }
 
 function getLogoSource(): string {
-  if (process.env.EMAIL_LOGO_URL && process.env.EMAIL_LOGO_URL.trim().length > 0) {
-    return process.env.EMAIL_LOGO_URL.trim();
-  }
-
-  // Primary: Read root folder images/logo.png
   try {
     const localLogoPath = path.resolve(process.cwd(), 'images', 'logo.png');
     if (fs.existsSync(localLogoPath)) {
@@ -225,7 +215,7 @@ export function renderEmailTemplate(
           ${message}
         </p>
         <div style="margin:28px 0; text-align:center;">
-          <a href="${getAppBaseUrl()}/service" style="display:inline-block; padding:14px 28px; background-color:#1c4f50; color:#ffffff; text-decoration:none; font-weight:600; font-size:14px; border-radius:8px; box-shadow:0 2px 8px rgba(28, 79, 80, 0.25);">
+          <a href="${getFrontendUrl()}/service" style="display:inline-block; padding:14px 28px; background-color:#1c4f50; color:#ffffff; text-decoration:none; font-weight:600; font-size:14px; border-radius:8px; box-shadow:0 2px 8px rgba(28, 79, 80, 0.25);">
             View Service Status
           </a>
         </div>
@@ -253,7 +243,7 @@ export function renderEmailTemplate(
           ${message}
         </p>
         <div style="margin:28px 0; text-align:center;">
-          <a href="${getAppBaseUrl()}/store" style="display:inline-block; padding:14px 28px; background-color:#1c4f50; color:#ffffff; text-decoration:none; font-weight:600; font-size:14px; border-radius:8px; box-shadow:0 2px 8px rgba(28, 79, 80, 0.25);">
+          <a href="${getFrontendUrl()}/store" style="display:inline-block; padding:14px 28px; background-color:#1c4f50; color:#ffffff; text-decoration:none; font-weight:600; font-size:14px; border-radius:8px; box-shadow:0 2px 8px rgba(28, 79, 80, 0.25);">
             Track Your Order
           </a>
         </div>
@@ -281,7 +271,7 @@ export function renderEmailTemplate(
           ${message}
         </p>
         <div style="margin:28px 0; text-align:center;">
-          <a href="${getAppBaseUrl()}/account/invoices" style="display:inline-block; padding:14px 28px; background-color:#1c4f50; color:#ffffff; text-decoration:none; font-weight:600; font-size:14px; border-radius:8px; box-shadow:0 2px 8px rgba(28, 79, 80, 0.25);">
+          <a href="${getFrontendUrl()}/account/invoices" style="display:inline-block; padding:14px 28px; background-color:#1c4f50; color:#ffffff; text-decoration:none; font-weight:600; font-size:14px; border-radius:8px; box-shadow:0 2px 8px rgba(28, 79, 80, 0.25);">
             View Formal Invoice
           </a>
         </div>
@@ -309,7 +299,7 @@ export function renderEmailTemplate(
           ${message}
         </p>
         <div style="margin:28px 0; text-align:center;">
-          <a href="${getAppBaseUrl()}/quotations" style="display:inline-block; padding:14px 28px; background-color:#1c4f50; color:#ffffff; text-decoration:none; font-weight:600; font-size:14px; border-radius:8px; box-shadow:0 2px 8px rgba(28, 79, 80, 0.25);">
+          <a href="${getFrontendUrl()}/quotations" style="display:inline-block; padding:14px 28px; background-color:#1c4f50; color:#ffffff; text-decoration:none; font-weight:600; font-size:14px; border-radius:8px; box-shadow:0 2px 8px rgba(28, 79, 80, 0.25);">
             Review & Accept Quotation
           </a>
         </div>
@@ -337,7 +327,7 @@ export function renderEmailTemplate(
           ${message}
         </p>
         <div style="margin:28px 0; text-align:center;">
-          <a href="${getAppBaseUrl()}/schedule" style="display:inline-block; padding:14px 28px; background-color:#1c4f50; color:#ffffff; text-decoration:none; font-weight:600; font-size:14px; border-radius:8px; box-shadow:0 2px 8px rgba(28, 79, 80, 0.25);">
+          <a href="${getFrontendUrl()}/schedule" style="display:inline-block; padding:14px 28px; background-color:#1c4f50; color:#ffffff; text-decoration:none; font-weight:600; font-size:14px; border-radius:8px; box-shadow:0 2px 8px rgba(28, 79, 80, 0.25);">
             View Dispatch Appointment
           </a>
         </div>

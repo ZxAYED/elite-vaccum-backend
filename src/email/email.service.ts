@@ -18,22 +18,12 @@ export class EmailService {
   constructor(private readonly configService: ConfigService) {}
 
   private createTransporter() {
-    const rawUser =
-      this.configService.get<string>('SMTP_USER') ||
-      this.configService.get<string>('AWS_SES_SMTP_USER');
-    const rawPass =
-      this.configService.get<string>('SMTP_PASS') ||
-      this.configService.get<string>('AWS_SES_SMTP_PASS');
-    const smtpUser = rawUser?.trim();
-    const smtpPass = rawPass?.replace(/\s+/g, '');
+    const smtpUser = this.configService.get<string>('SMTP_USER')?.trim();
+    const smtpPass = this.configService.get<string>('SMTP_PASS')?.replace(/\s+/g, '');
     const smtpHost =
-      this.configService.get<string>('SMTP_HOST') ||
-      this.configService.get<string>('AWS_SES_SMTP_HOST') ||
-      'smtp.gmail.com';
+      this.configService.get<string>('SMTP_HOST') || 'smtp.gmail.com';
     const smtpPort = Number(
-      this.configService.get<string>('SMTP_PORT') ||
-      this.configService.get<string>('AWS_SES_SMTP_PORT') ||
-      '587',
+      this.configService.get<string>('SMTP_PORT') || '587',
     );
     const smtpSecure =
       this.configService.get<string>('SMTP_SECURE') === 'true' ||
@@ -55,8 +45,7 @@ export class EmailService {
       }),
       defaultFrom:
         this.configService.get<string>('SMTP_FROM_EMAIL') ||
-        this.configService.get<string>('AWS_SES_FROM_EMAIL') ||
-        smtpUser,
+        `Elite Central Vacuum <${smtpUser}>`,
     };
   }
 
