@@ -137,6 +137,7 @@ export class AuthService {
     purpose: OtpPurpose,
     otp: string,
   ) {
+    const cleanOtp = otp.trim();
     const record = await this.prisma.otpCode.findFirst({
       where: {
         email,
@@ -148,7 +149,7 @@ export class AuthService {
     });
 
     if (!record) {
-      throw new UnauthorizedException('Invalid or expired OTP');
+      throw new UnauthorizedException('Invalid or expired verification code. Please request a new code.');
     }
 
     if (record.attempts >= record.maxAttempts) {
@@ -156,16 +157,16 @@ export class AuthService {
         where: { id: record.id },
         data: { isConsumed: true },
       });
-      throw new UnauthorizedException('Too many attempts. Request a new OTP');
+      throw new UnauthorizedException('Too many failed attempts. Please request a new verification code.');
     }
 
-    const matches = await bcrypt.compare(otp, record.codeHash);
+    const matches = await bcrypt.compare(cleanOtp, record.codeHash);
     if (!matches) {
       await this.prisma.otpCode.update({
         where: { id: record.id },
         data: { attempts: { increment: 1 } },
       });
-      throw new UnauthorizedException('Invalid OTP');
+      throw new UnauthorizedException('Incorrect verification code. Please check and try again.');
     }
 
     await this.prisma.otpCode.update({
@@ -243,17 +244,56 @@ export class AuthService {
 
     if (existing) {
       if (!existing.isActive) {
-        throw new ConflictException('Account is disabled');
+        throw new ConflictException('This account has been deactivated. Please contact support.');
       }
 
       if (existing.emailVerifiedAt) {
-        throw new ConflictException('Email already registered');
+        throw new ConflictException('This email is already registered and verified. Please log in.');
       }
+
+      // If user registered before but never verified, update password & details and resend OTP
+      const passwordHash = await bcrypt.hash(params.password, 12);
+      const parts = params.fullName.trim().split(' ');
+      const firstName = parts[0] || 'Customer';
+      const lastName = parts.slice(1).join(' ') || '';
+
+      await this.prisma.user.update({
+        where: { id: existing.id },
+        data: {
+          firstName,
+          lastName,
+          passwordHash,
+          phone: params.phone?.trim() || null,
+        },
+      });
+
+      await this.prisma.customer.upsert({
+        where: { userId: existing.id },
+        create: {
+          userId: existing.id,
+          displayName: params.fullName.trim(),
+          firstName,
+          lastName,
+          email,
+          phone: params.phone?.trim() || '',
+          cellphone: params.cellphone?.trim() || null,
+          company: params.companyName?.trim() || null,
+          status: CustomerStatus.ACTIVE,
+        },
+        update: {
+          displayName: params.fullName.trim(),
+          firstName,
+          lastName,
+          phone: params.phone?.trim() || undefined,
+          cellphone: params.cellphone?.trim() || null,
+          company: params.companyName?.trim() || null,
+        },
+      });
 
       await this.createAndSendOtp(email, OtpPurpose.EMAIL_VERIFICATION);
       return {
         message:
-          'Verification OTP sent. Check your email to verify your account.',
+          'Account is pending verification. A new verification OTP has been sent to your email.',
       };
     }
 
@@ -299,7 +339,7 @@ export class AuthService {
     await this.createAndSendOtp(email, OtpPurpose.EMAIL_VERIFICATION);
 
     return {
-      message: 'Signup successful. Check your email for verification OTP.',
+      message: 'Signup successful. A verification code has been sent to your email.',
     };
   }
 
@@ -315,22 +355,27 @@ export class AuthService {
       },
     });
 
-    if (!user) throw new NotFoundException('User not found');
-    if (!user.isActive) throw new ConflictException('Account is disabled');
+    if (!user) {
+      throw new NotFoundException('No account found with this email. Please sign up first.');
+    }
+    if (!user.isActive) {
+      throw new ConflictException('This account has been deactivated. Please contact support.');
+    }
     if (user.emailVerifiedAt) {
-      throw new ConflictException('User already verified');
+      throw new ConflictException('This email is already verified. Please log in.');
     }
 
     await this.createAndSendOtp(email, OtpPurpose.EMAIL_VERIFICATION);
 
     return {
       message:
-        'Verification OTP resent successfully. Check your email. You have limited time to verify.',
+        'A new verification code has been sent to your email. Please check your inbox.',
     };
   }
 
   async verifyRegistrationOtp(params: { email: string; otp: string }) {
     const email = this.normalizeEmail(params.email);
+    const cleanOtp = params.otp.trim();
 
     const user = await this.prisma.user.findUnique({
       where: { email },
@@ -341,16 +386,20 @@ export class AuthService {
       },
     });
 
-    if (!user) throw new NotFoundException('User not found');
-    if (!user.isActive) throw new ConflictException('Account is disabled');
+    if (!user) {
+      throw new NotFoundException('No account found with this email. Please sign up first.');
+    }
+    if (!user.isActive) {
+      throw new ConflictException('This account has been deactivated. Please contact support.');
+    }
     if (user.emailVerifiedAt) {
-      throw new ConflictException('User already verified');
+      throw new ConflictException('This email is already verified. Please log in.');
     }
 
     await this.validateOtpOrThrow(
       email,
       OtpPurpose.EMAIL_VERIFICATION,
-      params.otp,
+      cleanOtp,
     );
 
     await this.prisma.user.update({
@@ -358,7 +407,7 @@ export class AuthService {
       data: { emailVerifiedAt: new Date() },
     });
 
-    return { message: 'Account verified successfully' };
+    return { message: 'Email verified successfully. You can now log in.' };
   }
 
   async login(
@@ -385,16 +434,25 @@ export class AuthService {
       },
     });
 
-    if (!user) throw new NotFoundException('User not found');
-    if (!user.passwordHash) {
-      throw new UnauthorizedException('Invalid login credentials');
+    if (!user) {
+      throw new UnauthorizedException('Invalid email or password.');
     }
-
-    this.assertUserCanAuthenticate(user);
+    if (!user.passwordHash) {
+      throw new UnauthorizedException('Invalid login credentials.');
+    }
+    if (!user.isActive) {
+      throw new UnauthorizedException('This account has been deactivated. Please contact support.');
+    }
+    if (!user.emailVerifiedAt) {
+      await this.createAndSendOtp(email, OtpPurpose.EMAIL_VERIFICATION);
+      throw new UnauthorizedException(
+        'Your email is not verified yet. A new verification code has been sent to your email.',
+      );
+    }
 
     const ok = await bcrypt.compare(params.password, user.passwordHash);
     if (!ok) {
-      throw new UnauthorizedException('Invalid email or password');
+      throw new UnauthorizedException('Invalid email or password.');
     }
 
     await this.prisma.user.update({
