@@ -1,38 +1,28 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import {
   EmailTemplateKey,
   type EmailTemplatePayload,
   type EmailTemplateRenderResult,
 } from '../types/email.types';
 
-export function getFrontendUrl(): string {
-  return (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+function getLogoUrl(): string {
+  return (
+    process.env.EMAIL_LOGO_URL ||
+    'https://res.cloudinary.com/dhl04adhz/image/upload/v1787991498/logo_ynl1ku.png'
+  );
 }
 
-function getLogoSource(): string {
-  try {
-    const localLogoPath = path.resolve(process.cwd(), 'images', 'logo.png');
-    if (fs.existsSync(localLogoPath)) {
-      const buffer = fs.readFileSync(localLogoPath);
-      return `data:image/png;base64,${buffer.toString('base64')}`;
-    }
-  } catch {
-    // Fallback to CID
-  }
-
-  return 'cid:elite-logo';
+function getFrontendUrl(): string {
+  return (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
 }
 
 interface ShellOptions {
   title: string;
-  badge?: string;
   body: string;
 }
 
 function renderShell(options: ShellOptions): string {
-  const { title, badge, body } = options;
-  const logoUrl = getLogoSource();
+  const { title, body } = options;
+  const logoUrl = getLogoUrl();
 
   return `
 <!DOCTYPE html>
@@ -43,7 +33,7 @@ function renderShell(options: ShellOptions): string {
   <title>${title}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     body {
       margin: 0;
@@ -51,67 +41,38 @@ function renderShell(options: ShellOptions): string {
       background-color: #fcfcfb;
       font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
       color: #122428;
-      -webkit-font-smoothing: antialiased;
-    }
-    table {
-      border-collapse: collapse;
     }
   </style>
 </head>
-<body style="margin:0; padding:32px 16px; background-color:#fcfcfb; font-family:'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color:#122428;">
+<body style="margin:0; padding:40px 16px; background-color:#fcfcfb; font-family:'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color:#122428;">
   <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
     <tr>
       <td align="center">
-        <!-- Main Card Container (max-width: 600px) -->
-        <table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px; background-color:#ffffff; border-radius:16px; overflow:hidden; border:1px solid #e5eceb; box-shadow:0 4px 20px rgba(18, 36, 40, 0.04);">
+        <!-- Main Card (Clean, Minimalist Surface) -->
+        <table width="100%" cellpadding="0" cellspacing="0" style="max-width:540px; background-color:#ffffff; border-radius:12px; overflow:hidden; border:1px solid #edf2f1; box-shadow:0 2px 12px rgba(18, 36, 40, 0.03);">
           
-          <!-- Header Banner (Brand Gradient) -->
+          <!-- Logo Header -->
           <tr>
-            <td style="padding:32px 32px 28px; background:linear-gradient(135deg, #1c4f50 0%, #153d3e 100%); text-align:center;">
-              <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
-                <tr>
-                  <td align="center">
-                    <!-- Brand Logo -->
-                    <div style="margin-bottom:14px; text-align:center;">
-                      <img src="${logoUrl}" alt="Elite Central Vacuum" style="height:48px; max-width:220px; object-fit:contain; display:inline-block; border:0; outline:none; text-decoration:none; color:#ffffff; font-weight:700; font-size:18px;" />
-                    </div>
-                    
-                    ${
-                      badge
-                        ? `<div style="display:inline-block; padding:4px 12px; background-color:rgba(255, 255, 255, 0.15); border:1px solid rgba(255, 255, 255, 0.25); border-radius:20px; color:#ffffff; font-size:11px; font-weight:600; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:10px;">${badge}</div>`
-                        : ''
-                    }
-                    
-                    <h1 style="margin:0; color:#ffffff; font-size:22px; font-weight:700; line-height:1.3; letter-spacing:-0.2px;">
-                      ${title}
-                    </h1>
-                  </td>
-                </tr>
-              </table>
+            <td style="padding:32px 32px 20px; text-align:center; border-bottom:1px solid #f4f7f6;">
+              <img src="${logoUrl}" alt="Elite Central Vacuum" style="height:44px; max-width:200px; object-fit:contain; display:inline-block; border:0;" />
             </td>
           </tr>
 
-          <!-- Email Content Body -->
+          <!-- Body Content -->
           <tr>
-            <td style="padding:36px 32px; font-size:15px; line-height:1.7; color:#122428;">
+            <td style="padding:32px; font-size:14px; line-height:1.65; color:#3c4f52;">
               ${body}
             </td>
           </tr>
 
-          <!-- Security / Assurance Footer -->
+          <!-- Minimal Footer -->
           <tr>
-            <td style="padding:24px 32px; background-color:#f4f7f6; border-top:1px solid #e5eceb; font-size:12px; line-height:1.6; color:#5a6e72; text-align:center;">
-              <p style="margin:0 0 8px; font-weight:600; color:#1c4f50;">
+            <td style="padding:20px 32px; background-color:#fafbfb; border-top:1px solid #edf2f1; font-size:11px; line-height:1.5; color:#859a9e; text-align:center;">
+              <p style="margin:0 0 4px; color:#5a6e72;">
                 Elite Central Vacuum Systems
               </p>
-              <p style="margin:0 0 12px;">
-                Premium Built-in Vacuum Solutions • Sales, Installation & Certified Maintenance
-              </p>
-              <p style="margin:0; font-size:11px; color:#859a9e;">
-                This is an automated transactional notification. If you have questions, please contact our support team at <a href="mailto:support@elitecentralvac.com" style="color:#1c4f50; text-decoration:underline;">support@elitecentralvac.com</a>.
-              </p>
-              <p style="margin:8px 0 0; font-size:11px; color:#859a9e;">
-                © ${new Date().getFullYear()} Elite Central Vacuum. All rights reserved.
+              <p style="margin:0;">
+                Questions? Contact <a href="mailto:support@elitecentralvac.com" style="color:#1c4f50; text-decoration:none;">support@elitecentralvac.com</a>
               </p>
             </td>
           </tr>
@@ -135,43 +96,35 @@ export function renderEmailTemplate(
       const subject = String(payload.subject ?? 'Verify Your Email');
 
       const body = `
-        <p style="margin:0 0 16px; font-size:16px; font-weight:500;">
-          Hello,
-        </p>
-        <p style="margin:0 0 24px; color:#3a4e52;">
-          Thank you for choosing Elite Central Vacuum. Use the verification code below to verify your email address and continue:
+        <h2 style="margin:0 0 12px; font-size:18px; font-weight:600; color:#122428;">
+          Verify Your Email
+        </h2>
+        <p style="margin:0 0 24px; color:#4a5f63;">
+          Please use the verification code below to complete your authentication:
         </p>
 
-        <!-- Verification OTP Card -->
-        <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin:28px 0;">
+        <!-- Clean Minimal OTP Box -->
+        <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin:20px 0;">
           <tr>
             <td align="center">
-              <div style="display:inline-block; padding:20px 36px; background-color:#f4f7f6; border:2px dashed #1c4f50; border-radius:14px; text-align:center;">
-                <div style="font-size:12px; font-weight:600; color:#5a6e72; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">
-                  Your One-Time Code
-                </div>
-                <div style="font-size:38px; font-weight:800; letter-spacing:10px; color:#1c4f50; font-family:monospace, 'Poppins', sans-serif; padding-left:10px;">
+              <div style="display:inline-block; padding:16px 32px; background-color:#f4f7f6; border-radius:10px; text-align:center;">
+                <div style="font-size:32px; font-weight:700; letter-spacing:8px; color:#1c4f50; font-family:monospace, 'Poppins', sans-serif; padding-left:8px;">
                   ${otp}
-                </div>
-                <div style="display:inline-block; margin-top:10px; padding:4px 12px; background-color:#e6efef; border-radius:12px; font-size:12px; font-weight:600; color:#1c4f50;">
-                  ⏱️ Expires in ${minutes} minutes
                 </div>
               </div>
             </td>
           </tr>
         </table>
 
-        <!-- Security Warning Box -->
-        <div style="padding:16px; background-color:#fcfcfb; border-left:4px solid #1c4f50; border-radius:4px 8px 8px 4px; margin:24px 0 16px; font-size:13px; color:#4a5f63;">
-          <strong>Security Notice:</strong> Never share this one-time password with anyone. Elite Central Vacuum staff will never ask for your code over the phone or via email. If you did not request this verification, you can safely ignore this email.
-        </div>
+        <p style="margin:20px 0 0; font-size:12px; color:#859a9e; text-align:center;">
+          This code expires in ${minutes} minutes. If you did not request this, please ignore this email.
+        </p>
       `;
 
       return {
         subject,
         html: renderShell({
           title: subject,
-          badge: 'Security Verification',
           body,
         }),
       };
@@ -182,22 +135,18 @@ export function renderEmailTemplate(
       const message = String(payload.message ?? 'An account update occurred.');
 
       const body = `
-        <p style="margin:0 0 16px; font-size:16px; font-weight:500;">
-          Hello,
-        </p>
-        <p style="margin:0 0 20px; color:#3a4e52;">
+        <h2 style="margin:0 0 12px; font-size:18px; font-weight:600; color:#122428;">
+          ${subject}
+        </h2>
+        <p style="margin:0 0 16px; color:#4a5f63;">
           ${message}
         </p>
-        <div style="margin:24px 0; padding:18px; background-color:#f4f7f6; border-radius:10px; font-size:14px; border:1px solid #e5eceb;">
-          If this activity was not initiated by you, please secure your account immediately or contact support.
-        </div>
       `;
 
       return {
         subject,
         html: renderShell({
           title: subject,
-          badge: 'Account Activity',
           body,
         }),
       };
@@ -208,15 +157,15 @@ export function renderEmailTemplate(
       const message = String(payload.message ?? 'Your service request has an update.');
 
       const body = `
-        <p style="margin:0 0 16px; font-size:16px; font-weight:500;">
-          Dear Customer,
-        </p>
-        <p style="margin:0 0 20px; color:#3a4e52;">
+        <h2 style="margin:0 0 12px; font-size:18px; font-weight:600; color:#122428;">
+          Service Request Update
+        </h2>
+        <p style="margin:0 0 24px; color:#4a5f63;">
           ${message}
         </p>
-        <div style="margin:28px 0; text-align:center;">
-          <a href="${getFrontendUrl()}/service" style="display:inline-block; padding:14px 28px; background-color:#1c4f50; color:#ffffff; text-decoration:none; font-weight:600; font-size:14px; border-radius:8px; box-shadow:0 2px 8px rgba(28, 79, 80, 0.25);">
-            View Service Status
+        <div style="margin:20px 0 0;">
+          <a href="${getFrontendUrl()}/service" style="display:inline-block; padding:10px 22px; background-color:#1c4f50; color:#ffffff; text-decoration:none; font-weight:600; font-size:13px; border-radius:6px;">
+            View Request
           </a>
         </div>
       `;
@@ -225,7 +174,6 @@ export function renderEmailTemplate(
         subject,
         html: renderShell({
           title: subject,
-          badge: 'Service Operations',
           body,
         }),
       };
@@ -236,15 +184,15 @@ export function renderEmailTemplate(
       const message = String(payload.message ?? 'Your order status has changed.');
 
       const body = `
-        <p style="margin:0 0 16px; font-size:16px; font-weight:500;">
-          Dear Customer,
-        </p>
-        <p style="margin:0 0 20px; color:#3a4e52;">
+        <h2 style="margin:0 0 12px; font-size:18px; font-weight:600; color:#122428;">
+          Order Update
+        </h2>
+        <p style="margin:0 0 24px; color:#4a5f63;">
           ${message}
         </p>
-        <div style="margin:28px 0; text-align:center;">
-          <a href="${getFrontendUrl()}/store" style="display:inline-block; padding:14px 28px; background-color:#1c4f50; color:#ffffff; text-decoration:none; font-weight:600; font-size:14px; border-radius:8px; box-shadow:0 2px 8px rgba(28, 79, 80, 0.25);">
-            Track Your Order
+        <div style="margin:20px 0 0;">
+          <a href="${getFrontendUrl()}/store" style="display:inline-block; padding:10px 22px; background-color:#1c4f50; color:#ffffff; text-decoration:none; font-weight:600; font-size:13px; border-radius:6px;">
+            Track Order
           </a>
         </div>
       `;
@@ -253,7 +201,6 @@ export function renderEmailTemplate(
         subject,
         html: renderShell({
           title: subject,
-          badge: 'Store & Orders',
           body,
         }),
       };
@@ -264,15 +211,15 @@ export function renderEmailTemplate(
       const message = String(payload.message ?? 'Your payment has been recorded.');
 
       const body = `
-        <p style="margin:0 0 16px; font-size:16px; font-weight:500;">
-          Dear Customer,
-        </p>
-        <p style="margin:0 0 20px; color:#3a4e52;">
+        <h2 style="margin:0 0 12px; font-size:18px; font-weight:600; color:#122428;">
+          Payment Receipt
+        </h2>
+        <p style="margin:0 0 24px; color:#4a5f63;">
           ${message}
         </p>
-        <div style="margin:28px 0; text-align:center;">
-          <a href="${getFrontendUrl()}/account/invoices" style="display:inline-block; padding:14px 28px; background-color:#1c4f50; color:#ffffff; text-decoration:none; font-weight:600; font-size:14px; border-radius:8px; box-shadow:0 2px 8px rgba(28, 79, 80, 0.25);">
-            View Formal Invoice
+        <div style="margin:20px 0 0;">
+          <a href="${getFrontendUrl()}/account/invoices" style="display:inline-block; padding:10px 22px; background-color:#1c4f50; color:#ffffff; text-decoration:none; font-weight:600; font-size:13px; border-radius:6px;">
+            View Invoice
           </a>
         </div>
       `;
@@ -281,7 +228,6 @@ export function renderEmailTemplate(
         subject,
         html: renderShell({
           title: subject,
-          badge: 'Billing & Payments',
           body,
         }),
       };
@@ -292,15 +238,15 @@ export function renderEmailTemplate(
       const message = String(payload.message ?? 'A new quotation has been prepared for your central vacuum service.');
 
       const body = `
-        <p style="margin:0 0 16px; font-size:16px; font-weight:500;">
-          Dear Customer,
-        </p>
-        <p style="margin:0 0 20px; color:#3a4e52;">
+        <h2 style="margin:0 0 12px; font-size:18px; font-weight:600; color:#122428;">
+          Service Quotation
+        </h2>
+        <p style="margin:0 0 24px; color:#4a5f63;">
           ${message}
         </p>
-        <div style="margin:28px 0; text-align:center;">
-          <a href="${getFrontendUrl()}/quotations" style="display:inline-block; padding:14px 28px; background-color:#1c4f50; color:#ffffff; text-decoration:none; font-weight:600; font-size:14px; border-radius:8px; box-shadow:0 2px 8px rgba(28, 79, 80, 0.25);">
-            Review & Accept Quotation
+        <div style="margin:20px 0 0;">
+          <a href="${getFrontendUrl()}/quotations" style="display:inline-block; padding:10px 22px; background-color:#1c4f50; color:#ffffff; text-decoration:none; font-weight:600; font-size:13px; border-radius:6px;">
+            Review Quotation
           </a>
         </div>
       `;
@@ -309,7 +255,6 @@ export function renderEmailTemplate(
         subject,
         html: renderShell({
           title: subject,
-          badge: 'Service Quotation',
           body,
         }),
       };
@@ -320,15 +265,15 @@ export function renderEmailTemplate(
       const message = String(payload.message ?? 'Your technician dispatch appointment has been scheduled.');
 
       const body = `
-        <p style="margin:0 0 16px; font-size:16px; font-weight:500;">
-          Dear Customer,
-        </p>
-        <p style="margin:0 0 20px; color:#3a4e52;">
+        <h2 style="margin:0 0 12px; font-size:18px; font-weight:600; color:#122428;">
+          Appointment Scheduled
+        </h2>
+        <p style="margin:0 0 24px; color:#4a5f63;">
           ${message}
         </p>
-        <div style="margin:28px 0; text-align:center;">
-          <a href="${getFrontendUrl()}/schedule" style="display:inline-block; padding:14px 28px; background-color:#1c4f50; color:#ffffff; text-decoration:none; font-weight:600; font-size:14px; border-radius:8px; box-shadow:0 2px 8px rgba(28, 79, 80, 0.25);">
-            View Dispatch Appointment
+        <div style="margin:20px 0 0;">
+          <a href="${getFrontendUrl()}/schedule" style="display:inline-block; padding:10px 22px; background-color:#1c4f50; color:#ffffff; text-decoration:none; font-weight:600; font-size:13px; border-radius:6px;">
+            View Appointment
           </a>
         </div>
       `;
@@ -337,7 +282,6 @@ export function renderEmailTemplate(
         subject,
         html: renderShell({
           title: subject,
-          badge: 'Technician Dispatch',
           body,
         }),
       };
@@ -345,11 +289,10 @@ export function renderEmailTemplate(
 
     default: {
       return {
-        subject: 'Elite Central Vacuum Notification',
+        subject: 'Notification',
         html: renderShell({
           title: 'Notification',
-          badge: 'System Notice',
-          body: `<p style="margin:0 0 16px;">${String(payload.message ?? 'You have a new update.')}</p>`,
+          body: `<p style="margin:0;">${String(payload.message ?? 'You have a new update.')}</p>`,
         }),
       };
     }

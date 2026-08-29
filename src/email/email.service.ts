@@ -1,5 +1,3 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import nodemailer from 'nodemailer';
@@ -60,16 +58,6 @@ export class EmailService {
       };
     }
 
-    const localLogoPath = path.resolve(process.cwd(), 'images', 'logo.png');
-    const attachments: Array<{ filename: string; path: string; cid: string }> = [];
-    if (fs.existsSync(localLogoPath)) {
-      attachments.push({
-        filename: 'logo.png',
-        path: localLogoPath,
-        cid: 'elite-logo',
-      });
-    }
-
     try {
       const info = await mailer.transporter.sendMail({
         from: input.from ?? mailer.defaultFrom,
@@ -77,7 +65,6 @@ export class EmailService {
         subject: input.subject,
         html: input.html,
         text: input.text,
-        attachments,
       });
 
       return {
