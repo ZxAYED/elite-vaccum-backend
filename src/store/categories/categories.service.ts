@@ -173,11 +173,11 @@ export class StoreCategoriesService {
     });
 
     if (!category) {
-      throw new NotFoundException(`Category '${idOrSlug}' not found`);
+      throw new NotFoundException('Category not found');
     }
 
     if (category.status !== 'ACTIVE' && !this.isAdmin(user)) {
-      throw new NotFoundException(`Category '${idOrSlug}' is inactive`);
+      throw new NotFoundException('Category is currently unavailable');
     }
 
     return category;
@@ -193,7 +193,7 @@ export class StoreCategoriesService {
     });
 
     if (!existing) {
-      throw new NotFoundException(`Category with ID '${id}' not found`);
+      throw new NotFoundException('Category not found');
     }
 
     let slug = existing.slug;
@@ -204,7 +204,7 @@ export class StoreCategoriesService {
         select: { id: true },
       });
       if (conflict && conflict.id !== id) {
-        throw new ConflictException(`Category slug '${slug}' is already taken`);
+        throw new ConflictException('Category slug is already taken');
       }
     } else if (dto.name && dto.name !== existing.name && !dto.slug) {
       slug = await this.generateUniqueCategorySlug(dto.name, id);
@@ -244,7 +244,7 @@ export class StoreCategoriesService {
     });
 
     if (!existing) {
-      throw new NotFoundException(`Category with ID '${id}' not found`);
+      throw new NotFoundException('Category not found');
     }
 
     if (existing._count.products > 0) {

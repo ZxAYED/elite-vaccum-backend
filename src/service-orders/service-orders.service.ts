@@ -129,7 +129,7 @@ export class ServiceOrdersService {
     });
 
     if (!serviceRequest) {
-      throw new NotFoundException(`Service Request '${dto.serviceRequestId}' not found`);
+      throw new NotFoundException('Service request not found');
     }
 
     const businessId = await this.generateServiceOrderBusinessId();
@@ -267,7 +267,7 @@ export class ServiceOrdersService {
     });
 
     if (!serviceOrder) {
-      throw new NotFoundException(`Service Order '${id}' not found`);
+      throw new NotFoundException('Service order not found');
     }
 
     if (!this.isAdmin(user)) {
@@ -285,7 +285,7 @@ export class ServiceOrdersService {
 
   async update(id: string, dto: UpdateServiceOrderDto, user: RequestUser) {
     const existing = await this.prisma.serviceOrder.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException(`Service Order with ID '${id}' not found`);
+    if (!existing) throw new NotFoundException('Service order not found');
 
     const updated = await this.prisma.serviceOrder.update({
       where: { id },
@@ -317,7 +317,7 @@ export class ServiceOrdersService {
       include: { invoices: true, customer: true, serviceRequest: true },
     });
 
-    if (!order) throw new NotFoundException(`Service Order with ID '${id}' not found`);
+    if (!order) throw new NotFoundException('Service order not found');
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.serviceOrder.update({
@@ -379,10 +379,10 @@ export class ServiceOrdersService {
     user: RequestUser,
   ) {
     const order = await this.prisma.serviceOrder.findUnique({ where: { id } });
-    if (!order) throw new NotFoundException(`Service Order with ID '${id}' not found`);
+    if (!order) throw new NotFoundException('Service order not found');
 
     const tech = await this.prisma.technician.findUnique({ where: { id: dto.technicianId } });
-    if (!tech) throw new NotFoundException(`Technician '${dto.technicianId}' not found`);
+    if (!tech) throw new NotFoundException('Technician not found');
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.serviceOrder.update({
@@ -414,7 +414,7 @@ export class ServiceOrdersService {
 
   async updateEta(id: string, dto: UpdateEtaDto, user: RequestUser) {
     const order = await this.prisma.serviceOrder.findUnique({ where: { id } });
-    if (!order) throw new NotFoundException(`Service Order with ID '${id}' not found`);
+    if (!order) throw new NotFoundException('Service order not found');
 
     if (!order.assignedTechnicianId) {
       throw new BadRequestException('Cannot update ETA for an unassigned service order');

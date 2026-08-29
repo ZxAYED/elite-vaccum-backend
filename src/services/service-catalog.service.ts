@@ -83,7 +83,7 @@ export class ServiceCatalogService implements OnModuleInit {
     );
 
     if (!fixed) {
-      throw new NotFoundException(`Service offering with slug '${slug}' not found`);
+      throw new NotFoundException('Service offering not found');
     }
 
     const dbRecord = await this.prisma.service

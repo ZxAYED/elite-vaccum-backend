@@ -29,7 +29,7 @@ export class StoreAddressesService {
     });
 
     if (!user) {
-      throw new NotFoundException(`User with ID '${userId}' not found`);
+      throw new NotFoundException('User account not found');
     }
 
     const created = await this.prisma.customer.create({
@@ -112,7 +112,7 @@ export class StoreAddressesService {
     });
 
     if (!address || address.customerId !== customerId) {
-      throw new NotFoundException(`Delivery address with ID '${id}' not found`);
+      throw new NotFoundException('Delivery address not found');
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -152,7 +152,7 @@ export class StoreAddressesService {
     });
 
     if (!address || address.customerId !== customerId) {
-      throw new NotFoundException(`Delivery address with ID '${id}' not found`);
+      throw new NotFoundException('Delivery address not found');
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -187,7 +187,7 @@ export class StoreAddressesService {
     });
 
     if (!address || address.customerId !== customerId) {
-      throw new NotFoundException(`Delivery address with ID '${id}' not found`);
+      throw new NotFoundException('Delivery address not found');
     }
 
     await this.prisma.$transaction(async (tx) => {

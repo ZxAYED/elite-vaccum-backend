@@ -234,7 +234,7 @@ export class ReviewsService {
 
   async moderate(id: string, dto: ModerateReviewDto, user: RequestUser) {
     const review = await this.prisma.customerReview.findUnique({ where: { id } });
-    if (!review) throw new NotFoundException(`Review with ID '${id}' not found`);
+    if (!review) throw new NotFoundException('Review not found');
 
     let newStatus = review.status;
     let publishedAt = review.publishedAt;
@@ -284,7 +284,7 @@ export class ReviewsService {
 
   async delete(id: string) {
     const review = await this.prisma.customerReview.findUnique({ where: { id } });
-    if (!review) throw new NotFoundException(`Review with ID '${id}' not found`);
+    if (!review) throw new NotFoundException('Review not found');
 
     await this.prisma.customerReview.delete({ where: { id } });
 

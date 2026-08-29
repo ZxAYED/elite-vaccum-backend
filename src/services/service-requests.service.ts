@@ -567,7 +567,7 @@ export class ServiceRequestsService {
     });
 
     if (!request) {
-      throw new NotFoundException(`Service Request '${idOrBusinessId}' not found`);
+      throw new NotFoundException('Service request not found');
     }
 
     if (!this.isAdmin(user)) {
@@ -593,7 +593,7 @@ export class ServiceRequestsService {
     });
 
     if (!request) {
-      throw new NotFoundException(`Service Request with ID '${id}' not found`);
+      throw new NotFoundException('Service request not found');
     }
 
     const updated = await this.prisma.serviceRequest.update({
@@ -625,7 +625,7 @@ export class ServiceRequestsService {
     });
 
     if (!request) {
-      throw new NotFoundException(`Service Request with ID '${id}' not found`);
+      throw new NotFoundException('Service request not found');
     }
 
     if (request.status === ServiceRequestStatus.REJECTED) {

@@ -104,7 +104,7 @@ export class BillingService {
     });
 
     if (!customer) {
-      throw new NotFoundException(`Customer with ID '${dto.customerId}' not found`);
+      throw new NotFoundException('Customer not found');
     }
 
     if (!dto.lineItems || dto.lineItems.length === 0) {
@@ -259,7 +259,7 @@ export class BillingService {
     });
 
     if (!invoice) {
-      throw new NotFoundException(`Invoice '${id}' not found`);
+      throw new NotFoundException('Invoice not found');
     }
 
     if (!this.isAdmin(user)) {
@@ -281,7 +281,7 @@ export class BillingService {
       include: { lineItems: true },
     });
 
-    if (!existing) throw new NotFoundException(`Invoice with ID '${id}' not found`);
+    if (!existing) throw new NotFoundException('Invoice not found');
 
     if (existing.status === InvoiceStatus.PAID) {
       throw new BadRequestException('Cannot edit an already paid invoice');
@@ -345,7 +345,7 @@ export class BillingService {
       include: { payments: true },
     });
 
-    if (!invoice) throw new NotFoundException(`Invoice with ID '${id}' not found`);
+    if (!invoice) throw new NotFoundException('Invoice not found');
 
     return this.prisma.$transaction(async (tx) => {
       const payment = await tx.payment.create({
@@ -394,14 +394,14 @@ export class BillingService {
       include: { payments: true },
     });
 
-    if (!invoice) throw new NotFoundException(`Invoice with ID '${id}' not found`);
+    if (!invoice) throw new NotFoundException('Invoice not found');
 
     const payment = await this.prisma.payment.findUnique({
       where: { id: dto.paymentId },
     });
 
     if (!payment || payment.invoiceId !== id) {
-      throw new NotFoundException(`Payment '${dto.paymentId}' not found for this invoice`);
+      throw new NotFoundException('Payment record not found for this invoice');
     }
 
     const refund = await this.prisma.refund.create({

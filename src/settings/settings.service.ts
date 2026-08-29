@@ -150,7 +150,7 @@ export class SettingsService implements OnModuleInit {
 
   async updateFaq(id: string, dto: UpdateFaqDto) {
     const existing = await this.prisma.systemFaq.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException(`FAQ with ID '${id}' not found`);
+    if (!existing) throw new NotFoundException('FAQ item not found');
 
     const updated = await this.prisma.systemFaq.update({
       where: { id },
@@ -172,7 +172,7 @@ export class SettingsService implements OnModuleInit {
 
   async deleteFaq(id: string) {
     const existing = await this.prisma.systemFaq.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException(`FAQ with ID '${id}' not found`);
+    if (!existing) throw new NotFoundException('FAQ item not found');
 
     await this.prisma.systemFaq.delete({ where: { id } });
 
@@ -211,7 +211,7 @@ export class SettingsService implements OnModuleInit {
     });
 
     if (!policy) {
-      throw new NotFoundException(`Policy with slug '${slug}' not found`);
+      throw new NotFoundException('Policy not found');
     }
 
     return {
@@ -240,7 +240,7 @@ export class SettingsService implements OnModuleInit {
 
   async updatePolicy(id: string, dto: UpdatePolicyDto) {
     const existing = await this.prisma.legalPolicy.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException(`Policy with ID '${id}' not found`);
+    if (!existing) throw new NotFoundException('Policy not found');
 
     const updated = await this.prisma.legalPolicy.update({
       where: { id },
@@ -261,7 +261,7 @@ export class SettingsService implements OnModuleInit {
 
   async deletePolicy(id: string) {
     const existing = await this.prisma.legalPolicy.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException(`Policy with ID '${id}' not found`);
+    if (!existing) throw new NotFoundException('Policy not found');
 
     await this.prisma.legalPolicy.delete({ where: { id } });
 

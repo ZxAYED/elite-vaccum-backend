@@ -114,7 +114,7 @@ export class QuotationsService {
     });
 
     if (!serviceRequest) {
-      throw new NotFoundException(`Service Request with ID '${dto.serviceRequestId}' not found`);
+      throw new NotFoundException('Service request not found');
     }
 
     if (dto.lineItems.length === 0) {
@@ -270,7 +270,7 @@ export class QuotationsService {
     });
 
     if (!quotation) {
-      throw new NotFoundException(`Quotation '${id}' not found`);
+      throw new NotFoundException('Quotation not found');
     }
 
     if (!this.isAdmin(user)) {
@@ -301,7 +301,7 @@ export class QuotationsService {
     });
 
     if (!existing) {
-      throw new NotFoundException(`Quotation with ID '${id}' not found`);
+      throw new NotFoundException('Quotation not found');
     }
 
     if (existing.status === QuotationStatus.ACCEPTED) {
@@ -385,7 +385,7 @@ export class QuotationsService {
 
   async send(id: string, user: RequestUser) {
     const existing = await this.prisma.quotation.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException(`Quotation with ID '${id}' not found`);
+    if (!existing) throw new NotFoundException('Quotation not found');
 
     const updated = await this.prisma.quotation.update({
       where: { id },
@@ -409,7 +409,7 @@ export class QuotationsService {
       include: { serviceRequest: true, customer: true, lineItems: true },
     });
 
-    if (!quotation) throw new NotFoundException(`Quotation with ID '${id}' not found`);
+    if (!quotation) throw new NotFoundException('Quotation not found');
 
     if (quotation.status === QuotationStatus.ACCEPTED) {
       throw new BadRequestException('Quotation has already been accepted');
@@ -484,7 +484,7 @@ export class QuotationsService {
 
   async reject(id: string, dto: RejectQuotationDto, user: RequestUser) {
     const quotation = await this.prisma.quotation.findUnique({ where: { id } });
-    if (!quotation) throw new NotFoundException(`Quotation with ID '${id}' not found`);
+    if (!quotation) throw new NotFoundException('Quotation not found');
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.quotation.update({

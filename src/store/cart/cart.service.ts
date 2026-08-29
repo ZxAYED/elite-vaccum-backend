@@ -36,7 +36,7 @@ export class StoreCartService {
     });
 
     if (!user) {
-      throw new NotFoundException(`User with ID '${userId}' not found`);
+      throw new NotFoundException('User account not found');
     }
 
     const created = await this.prisma.customer.create({
@@ -168,7 +168,7 @@ export class StoreCartService {
     });
 
     if (!product) {
-      throw new NotFoundException(`Product with ID '${dto.productId}' not found`);
+      throw new NotFoundException('Product not found');
     }
 
     if (product.status !== ProductStatus.ACTIVE) {
@@ -275,7 +275,7 @@ export class StoreCartService {
     });
 
     if (!item || item.cartId !== cart.id) {
-      throw new NotFoundException(`Cart item with ID '${itemId}' not found in your cart`);
+      throw new NotFoundException('Cart item not found');
     }
 
     if (dto.quantity > item.product.quantity) {
@@ -309,7 +309,7 @@ export class StoreCartService {
     });
 
     if (!item || item.cartId !== cart.id) {
-      throw new NotFoundException(`Cart item with ID '${itemId}' not found in your cart`);
+      throw new NotFoundException('Cart item not found');
     }
 
     await this.prisma.cartItem.delete({ where: { id: itemId } });

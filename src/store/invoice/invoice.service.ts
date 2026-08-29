@@ -49,7 +49,7 @@ export class StoreInvoiceService {
     });
 
     if (!order) {
-      throw new NotFoundException(`Order '${orderId}' not found`);
+      throw new NotFoundException('Order not found');
     }
 
     if (!this.isAdmin(user) && (!user || user.id !== order.customer.userId)) {
@@ -58,7 +58,7 @@ export class StoreInvoiceService {
 
     const invoice = order.invoices[0];
     if (!invoice) {
-      throw new NotFoundException(`No invoice found for order '${order.businessId}'`);
+      throw new NotFoundException('Invoice not found for this order');
     }
 
     return {
@@ -89,7 +89,7 @@ export class StoreInvoiceService {
     });
 
     if (!order) {
-      throw new NotFoundException(`Order '${orderId}' not found`);
+      throw new NotFoundException('Order not found');
     }
 
     if (!this.isAdmin(user) && (!user || user.id !== order.customer.userId)) {

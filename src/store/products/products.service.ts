@@ -440,20 +440,16 @@ export class StoreProductsService {
     });
 
     if (!product) {
-      throw new NotFoundException(`Product '${idOrSku}' not found`);
+      throw new NotFoundException('Product not found');
     }
 
     // Public visitors cannot access draft, archived, or inactive category products
     if (!this.isAdmin(user)) {
       if (product.status !== ProductStatus.ACTIVE) {
-        throw new NotFoundException(
-          `Product '${idOrSku}' is not currently available`,
-        );
+        throw new NotFoundException('Product is not currently available');
       }
       if (product.category.status !== 'ACTIVE') {
-        throw new NotFoundException(
-          `Product category is not currently available`,
-        );
+        throw new NotFoundException('Product category is not currently available');
       }
     }
 
@@ -474,7 +470,7 @@ export class StoreProductsService {
     });
 
     if (!existing) {
-      throw new NotFoundException(`Product with ID '${id}' not found`);
+      throw new NotFoundException('Product not found');
     }
 
     if (dto.categoryId && dto.categoryId !== existing.categoryId) {
@@ -483,9 +479,7 @@ export class StoreProductsService {
         select: { id: true },
       });
       if (!category) {
-        throw new NotFoundException(
-          `Category with ID '${dto.categoryId}' not found`,
-        );
+        throw new NotFoundException('Category not found');
       }
     }
 
@@ -670,7 +664,7 @@ export class StoreProductsService {
     });
 
     if (!product) {
-      throw new NotFoundException(`Product with ID '${productId}' not found`);
+      throw new NotFoundException('Product not found');
     }
 
     const imagesToDelete = product.images.filter((img) =>
@@ -678,7 +672,7 @@ export class StoreProductsService {
     );
 
     if (imagesToDelete.length === 0) {
-      throw new NotFoundException(`No matching images found to delete`);
+      throw new NotFoundException('No matching images found to delete');
     }
 
     const deleteIds = imagesToDelete.map((img) => img.id);
@@ -718,7 +712,7 @@ export class StoreProductsService {
     });
 
     if (!product) {
-      throw new NotFoundException(`Product with ID '${id}' not found`);
+      throw new NotFoundException('Product not found');
     }
 
     // If product has already been ordered, archive instead of hard delete to preserve historical receipts
@@ -767,7 +761,7 @@ export class StoreProductsService {
   ) {
     const product = await this.prisma.product.findUnique({ where: { id } });
     if (!product) {
-      throw new NotFoundException(`Product with ID '${id}' not found`);
+      throw new NotFoundException('Product not found');
     }
 
     return this.prisma.product.update({
@@ -787,7 +781,7 @@ export class StoreProductsService {
   ) {
     const product = await this.prisma.product.findUnique({ where: { id } });
     if (!product) {
-      throw new NotFoundException(`Product with ID '${id}' not found`);
+      throw new NotFoundException('Product not found');
     }
 
     const availability =
@@ -818,7 +812,7 @@ export class StoreProductsService {
     });
 
     if (!product) {
-      throw new NotFoundException(`Product with ID '${productId}' not found`);
+      throw new NotFoundException('Product not found');
     }
 
     if (product.quantity < quantity) {
@@ -857,7 +851,7 @@ export class StoreProductsService {
     });
 
     if (!product) {
-      throw new NotFoundException(`Product with ID '${productId}' not found`);
+      throw new NotFoundException('Product not found');
     }
 
     const newQuantity = product.quantity + quantity;

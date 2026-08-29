@@ -85,7 +85,7 @@ export class StoreOrdersService {
       where: { id: userId },
     });
     if (!userRecord) {
-      throw new NotFoundException(`User with ID '${userId}' not found`);
+      throw new NotFoundException('User account not found');
     }
 
     const created = await this.prisma.customer.create({
@@ -792,7 +792,7 @@ export class StoreOrdersService {
     });
 
     if (!order) {
-      throw new NotFoundException(`Order '${idOrBusinessId}' not found`);
+      throw new NotFoundException('Order not found');
     }
 
     if (!this.isAdmin(user)) {
@@ -889,7 +889,7 @@ export class StoreOrdersService {
     });
 
     if (!order) {
-      throw new NotFoundException(`Order with ID '${id}' not found`);
+      throw new NotFoundException('Order not found');
     }
 
     const newStatus = dto.status || order.status;

@@ -152,7 +152,7 @@ export class TechniciansService {
     });
 
     if (!technician) {
-      throw new NotFoundException(`Technician with ID '${id}' not found`);
+      throw new NotFoundException('Technician not found');
     }
 
     return technician;
@@ -166,7 +166,7 @@ export class TechniciansService {
     });
 
     if (existingUser) {
-      throw new ConflictException(`A user with email '${email}' already exists`);
+      throw new ConflictException('An account with this email already exists');
     }
 
     const parts = dto.displayName.trim().split(' ');
@@ -218,7 +218,7 @@ export class TechniciansService {
     });
 
     if (!existing) {
-      throw new NotFoundException(`Technician with ID '${id}' not found`);
+      throw new NotFoundException('Technician not found');
     }
 
     const updated = await this.prisma.technician.update({
@@ -255,7 +255,7 @@ export class TechniciansService {
     });
 
     if (!existing) {
-      throw new NotFoundException(`Technician with ID '${id}' not found`);
+      throw new NotFoundException('Technician not found');
     }
 
     await this.prisma.$transaction([

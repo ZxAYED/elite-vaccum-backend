@@ -240,7 +240,7 @@ export class ScheduleService {
         where: { id: serviceRequestId },
       });
       if (!request) {
-        throw new NotFoundException(`Service Request with ID '${serviceRequestId}' not found`);
+        throw new NotFoundException('Service request not found');
       }
       addressSnapshot = request.serviceAddress;
     } else if (serviceOrderId) {
@@ -249,7 +249,7 @@ export class ScheduleService {
         include: { serviceRequest: true },
       });
       if (!order) {
-        throw new NotFoundException(`Service Order with ID '${serviceOrderId}' not found`);
+        throw new NotFoundException('Service order not found');
       }
       serviceRequestId = order.serviceRequestId;
       addressSnapshot = order.serviceRequest.serviceAddress;
@@ -353,7 +353,7 @@ export class ScheduleService {
     });
 
     if (!appointment) {
-      throw new NotFoundException(`Appointment with ID '${appointmentId}' not found`);
+      throw new NotFoundException('Appointment not found');
     }
 
     let startAt = appointment.startAt;
@@ -425,7 +425,7 @@ export class ScheduleService {
     });
 
     if (!appointment) {
-      throw new NotFoundException(`Appointment with ID '${appointmentId}' not found`);
+      throw new NotFoundException('Appointment not found');
     }
 
     const tech = await this.prisma.technician.findUnique({
@@ -433,7 +433,7 @@ export class ScheduleService {
     });
 
     if (!tech) {
-      throw new NotFoundException(`Technician with ID '${dto.technicianId}' not found`);
+      throw new NotFoundException('Technician not found');
     }
 
     // Conflict check for target technician
@@ -483,7 +483,7 @@ export class ScheduleService {
     });
 
     if (!appointment) {
-      throw new NotFoundException(`Appointment with ID '${appointmentId}' not found`);
+      throw new NotFoundException('Appointment not found');
     }
 
     const updatedNotes = `${appointment.notes ? `${appointment.notes}\n` : ''}[CANCELLED by Admin (${user.email}) on ${new Date().toISOString()}]: ${dto.reason.trim()}`;

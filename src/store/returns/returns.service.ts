@@ -51,7 +51,7 @@ export class StoreReturnsService {
     });
 
     if (!order) {
-      throw new NotFoundException(`Order '${orderId}' not found`);
+      throw new NotFoundException('Order not found');
     }
 
     if (!this.isAdmin(user) && (!user || user.id !== order.customer.userId)) {
@@ -119,7 +119,7 @@ export class StoreReturnsService {
     });
 
     if (!order) {
-      throw new NotFoundException(`Order '${orderId}' not found`);
+      throw new NotFoundException('Order not found');
     }
 
     if (!this.isAdmin(user) && (!user || user.id !== order.customer.userId)) {
@@ -160,7 +160,7 @@ export class StoreReturnsService {
     });
 
     if (!order) {
-      throw new NotFoundException(`Order '${orderId}' not found`);
+      throw new NotFoundException('Order not found');
     }
 
     if (order.status === ProductOrderStatus.REFUNDED) {
