@@ -55,6 +55,40 @@ export class StoreProductsController {
     summary:
       'Create product (SKU auto-generated in backend, multipart images supported)',
   })
+  @ApiBody({
+    description: 'Create Product payload with optional direct image file uploads to Cloudinary',
+    schema: {
+      type: 'object',
+      properties: {
+        data: {
+          type: 'string',
+          description: 'JSON string of CreateProductDto',
+          example: JSON.stringify(
+            {
+              name: 'Elite Pro Central Vacuum Unit',
+              slug: 'elite-pro-central-vacuum-unit',
+              description: 'Heavy duty central vacuum system',
+              price: 899.99,
+              stock: 25,
+              categoryId: '2e6d4ef0-71e5-4e1c-8fcb-2cfd4a8c8ed6',
+              brand: 'Elite Central Vacuum',
+              isFeatured: true,
+            },
+            null,
+            2,
+          ),
+        },
+        images: {
+          type: 'array',
+          items: {
+            type: 'string',
+            format: 'binary',
+          },
+          description: 'Direct image files to upload to Cloudinary',
+        },
+      },
+    },
+  })
   @ApiResponse({ status: 201, description: 'Product successfully created' })
   @ApiResponse({ status: 400, description: 'Invalid input payload' })
   @ApiResponse({ status: 404, description: 'Category not found' })

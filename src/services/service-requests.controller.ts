@@ -12,6 +12,7 @@ import {
 import { FilesInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiConsumes,
   ApiOperation,
   ApiResponse,
@@ -41,7 +42,53 @@ export class ServiceRequestsController {
   @ApiOperation({
     summary: 'Submit customer service intake request with direct file uploads',
     description:
-      'Submits an intake service request. Accepts direct image/video/doc file uploads in "attachments" or "files" field, auto-uploads them to Cloudinary, and saves all attributes into the database. Auto-provisions guest customer lead or links authenticated customer account.',
+      'Submits an intake service request. In Swagger / Frontend, provide the request JSON in `data` and attach multiple photos/videos/docs in `attachments`. Files are automatically uploaded to Cloudinary.',
+  })
+  @ApiBody({
+    description: 'Service intake request with direct Cloudinary file attachments',
+    schema: {
+      type: 'object',
+      properties: {
+        data: {
+          type: 'string',
+          description: 'JSON string of CreateServiceRequestDto',
+          example: JSON.stringify(
+            {
+              serviceSlug: 'vacuum-repair',
+              fullName: 'Jane Doe',
+              email: 'customer@elitecentralvac.com',
+              phone: '+1-555-234-5678',
+              address: '742 Evergreen Terrace',
+              city: 'Springfield',
+              state: 'OR',
+              zipCode: '97477',
+              problemLocation: 'Basement & 2nd Floor',
+              preferredDate: '2026-09-15',
+              timeWindow: '09:00 AM - 11:00 AM',
+              problemDescription:
+                'The central vacuum has almost zero suction upstairs and emits a high pitched whistle.',
+              symptoms: ['LOW_SUCTION', 'NOISE'],
+              manufacturer: 'Beam / Electrolux',
+              modelNumber: 'Serenity SC375',
+              serialNumber: 'SN-98234-X',
+              unitLocation: 'Attached Garage Wall',
+              additionalNotes:
+                'Gate code is #4321. Friendly dog in the backyard.',
+            },
+            null,
+            2,
+          ),
+        },
+        attachments: {
+          type: 'array',
+          items: {
+            type: 'string',
+            format: 'binary',
+          },
+          description: 'Upload multiple photo/video/doc attachments to Cloudinary',
+        },
+      },
+    },
   })
   @ApiResponse({ status: 201, description: 'Service intake request created' })
   async createRequest(
@@ -140,6 +187,27 @@ export class ServiceRequestsController {
   @ApiOperation({
     summary: 'Append media attachments or upload files directly to an active service request',
     description: 'Upload and attach photos, videos, or documents directly to Cloudinary and attach to service request.',
+  })
+  @ApiBody({
+    description: 'Upload files directly to Cloudinary and attach to service request',
+    schema: {
+      type: 'object',
+      properties: {
+        attachments: {
+          type: 'array',
+          items: {
+            type: 'string',
+            format: 'binary',
+          },
+          description: 'Directly upload files (photos, videos, docs) to Cloudinary',
+        },
+        data: {
+          type: 'string',
+          description: 'Optional JSON metadata for attachments',
+          example: '{"attachments": []}',
+        },
+      },
+    },
   })
   @ApiResponse({ status: 200, description: 'Attachments added successfully' })
   async addAttachments(
