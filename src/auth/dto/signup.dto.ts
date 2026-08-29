@@ -14,12 +14,12 @@ export class SignupDto {
   @IsEmail()
   email!: string;
 
-  @ApiProperty({ example: 'Admin123!', minLength: 6 })
+  @ApiProperty({ example: 'Password123!', minLength: 6 })
   @IsString()
   @MinLength(6)
   password!: string;
 
-  @ApiProperty({ example: 'Elite Admin' })
+  @ApiProperty({ example: 'John Doe' })
   @IsString()
   @MinLength(2)
   @MaxLength(120)
