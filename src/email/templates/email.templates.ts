@@ -1,10 +1,12 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   EmailTemplateKey,
   type EmailTemplatePayload,
   type EmailTemplateRenderResult,
 } from '../types/email.types';
 
-function getAppBaseUrl(): string {
+export function getAppBaseUrl(): string {
   return (
     process.env.FRONTEND_URL ||
     process.env.NEXT_PUBLIC_APP_URL ||
@@ -13,12 +15,23 @@ function getAppBaseUrl(): string {
   ).replace(/\/$/, '');
 }
 
-function getLogoUrl(): string {
+function getLogoSource(): string {
   if (process.env.EMAIL_LOGO_URL && process.env.EMAIL_LOGO_URL.trim().length > 0) {
     return process.env.EMAIL_LOGO_URL.trim();
   }
-  const baseUrl = getAppBaseUrl();
-  return `${baseUrl}/image/logo.png`;
+
+  // Primary: Read root folder images/logo.png
+  try {
+    const localLogoPath = path.resolve(process.cwd(), 'images', 'logo.png');
+    if (fs.existsSync(localLogoPath)) {
+      const buffer = fs.readFileSync(localLogoPath);
+      return `data:image/png;base64,${buffer.toString('base64')}`;
+    }
+  } catch {
+    // Fallback to CID
+  }
+
+  return 'cid:elite-logo';
 }
 
 interface ShellOptions {
@@ -29,7 +42,7 @@ interface ShellOptions {
 
 function renderShell(options: ShellOptions): string {
   const { title, badge, body } = options;
-  const logoUrl = getLogoUrl();
+  const logoUrl = getLogoSource();
 
   return `
 <!DOCTYPE html>

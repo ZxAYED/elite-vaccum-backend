@@ -24,6 +24,7 @@ export type SendEmailInput = {
   html: string;
   text?: string;
   from?: string;
+  attachments?: any[];
 };
 
 export enum EmailTemplateKey {
