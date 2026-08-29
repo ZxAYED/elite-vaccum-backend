@@ -1,14 +1,17 @@
 import { IsEmail, IsString, Length, MinLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 
 export class ResetPasswordDto {
-  @ApiProperty({ example: 'customer@example.com' })
+  @ApiProperty({ example: 'customer@elitecentralvac.com' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
   @IsEmail()
   email!: string;
 
-  @ApiProperty({ example: '12345', minLength: 5, maxLength: 5 })
+  @ApiProperty({ example: '12345', description: 'Reset verification code' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : String(value ?? '')))
   @IsString()
-  @Length(5, 5)
+  @Length(4, 10)
   otp!: string;
 
   @ApiProperty({ example: 'NewPass123!' })
