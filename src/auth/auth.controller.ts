@@ -1,5 +1,14 @@
-import { Body, Controller, Get, Post, Req } from '@nestjs/common';
-import type { Request } from 'express';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Req,
+  Res,
+  UnauthorizedException,
+} from '@nestjs/common';
+import type { Request, Response } from 'express';
+import type { CookieOptions } from 'express';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -26,6 +35,19 @@ import {
   AuthUserResponseDto,
   MessageResponseDto,
 } from './dto/auth.swagger';
+
+const REFRESH_COOKIE_NAME = 'refreshToken';
+
+const getRefreshCookieOptions = (): CookieOptions => {
+  const isProd = process.env.NODE_ENV === 'production';
+  return {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
+    path: '/',
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+  };
+};
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -83,11 +105,12 @@ export class AuthController {
   @Public()
   @Post('login')
   @ApiOperation({
-    summary: 'Authenticate a user and issue access/refresh tokens',
+    summary:
+      'Authenticate a user: returns access token in body and auto-saves refresh token in secure HttpOnly cookie',
   })
   @ApiBody({ type: LoginDto })
   @ApiOkResponse({
-    description: 'Login successful.',
+    description: 'Login successful. Access token returned in body, refresh token saved in HttpOnly cookie.',
     type: AuthTokensResponseDto,
   })
   @ApiNotFoundResponse({ description: 'User not found.' })
@@ -95,10 +118,23 @@ export class AuthController {
     description:
       'Invalid credentials or account is not allowed to authenticate.',
   })
-  login(@Body() dto: LoginDto, @Req() req: Request) {
+  async login(
+    @Body() dto: LoginDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const ip = req.ip;
     const userAgent = req.headers['user-agent'];
-    return this.auth.login(dto, { ip, userAgent });
+    const result = await this.auth.login(dto, { ip, userAgent });
+
+    // Auto-save refresh token in secure HttpOnly cookie
+    res.cookie(REFRESH_COOKIE_NAME, result.refreshToken, getRefreshCookieOptions());
+
+    // Send only user and accessToken in JSON response
+    return {
+      user: result.user,
+      accessToken: result.accessToken,
+    };
   }
 
   @Public()
@@ -136,8 +172,11 @@ export class AuthController {
 
   @Public()
   @Post('refresh-token')
-  @ApiOperation({ summary: 'Issue a new access token using a refresh token' })
-  @ApiBody({ type: RefreshTokenDto })
+  @ApiOperation({
+    summary:
+      'Issue a new access token using the refresh token from HttpOnly cookie (or body fallback)',
+  })
+  @ApiBody({ type: RefreshTokenDto, required: false })
   @ApiOkResponse({
     description: 'Token refresh successful.',
     type: AuthTokensResponseDto,
@@ -145,8 +184,42 @@ export class AuthController {
   @ApiUnauthorizedResponse({
     description: 'Refresh token is invalid or expired.',
   })
-  refreshToken(@Body() dto: RefreshTokenDto) {
-    return this.auth.refreshToken(dto);
+  async refreshToken(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() dto?: RefreshTokenDto,
+  ) {
+    const rawCookies = req.cookies as Record<string, string | undefined> | undefined;
+    const token =
+      rawCookies?.[REFRESH_COOKIE_NAME] ||
+      rawCookies?.['refresh_token'] ||
+      dto?.refreshToken;
+
+    if (!token) {
+      throw new UnauthorizedException('Refresh token is required in cookie or body');
+    }
+
+    const result = await this.auth.refreshToken({ refreshToken: token });
+
+    // Rotate/refresh cookie
+    res.cookie(REFRESH_COOKIE_NAME, result.refreshToken, getRefreshCookieOptions());
+
+    return {
+      user: result.user,
+      accessToken: result.accessToken,
+    };
+  }
+
+  @Public()
+  @Post('logout')
+  @ApiOperation({ summary: 'Logout user and clear the refresh token HttpOnly cookie' })
+  @ApiOkResponse({
+    description: 'Logged out successfully.',
+    type: MessageResponseDto,
+  })
+  async logout(@Res({ passthrough: true }) res: Response) {
+    res.clearCookie(REFRESH_COOKIE_NAME, getRefreshCookieOptions());
+    return { message: 'Logged out successfully' };
   }
 
   @Get('me')
