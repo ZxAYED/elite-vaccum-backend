@@ -9,8 +9,16 @@ function getAppBaseUrl(): string {
     process.env.FRONTEND_URL ||
     process.env.NEXT_PUBLIC_APP_URL ||
     process.env.APP_URL ||
-    'http://localhost:3000'
+    'http://localhost:5173'
   ).replace(/\/$/, '');
+}
+
+function getLogoUrl(): string {
+  if (process.env.EMAIL_LOGO_URL && process.env.EMAIL_LOGO_URL.trim().length > 0) {
+    return process.env.EMAIL_LOGO_URL.trim();
+  }
+  const baseUrl = getAppBaseUrl();
+  return `${baseUrl}/image/logo.png`;
 }
 
 interface ShellOptions {
@@ -21,8 +29,7 @@ interface ShellOptions {
 
 function renderShell(options: ShellOptions): string {
   const { title, badge, body } = options;
-  const baseUrl = getAppBaseUrl();
-  const logoUrl = `${baseUrl}/image/logo.png`;
+  const logoUrl = getLogoUrl();
 
   return `
 <!DOCTYPE html>
@@ -35,14 +42,6 @@ function renderShell(options: ShellOptions): string {
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
-    /* CSS Variables & Tokens:
-       --background: #fcfcfb;
-       --foreground: #122428;
-       --surface: #ffffff;
-       --surface-muted: #f4f7f6;
-       --brand: #1c4f50;
-       --brand-hover: #153d3e;
-    */
     body {
       margin: 0;
       padding: 0;
@@ -69,12 +68,9 @@ function renderShell(options: ShellOptions): string {
               <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
                 <tr>
                   <td align="center">
-                    <!-- Brand Logo with Fallback Styling -->
-                    <div style="margin-bottom:12px;">
-                      <img src="${logoUrl}" alt="Elite Central Vacuum" style="height:48px; max-width:200px; object-fit:contain; display:inline-block;" onerror="this.style.display='none'; document.getElementById('text-brand-logo').style.display='block';" />
-                      <div id="text-brand-logo" style="display:none; color:#ffffff; font-size:22px; font-weight:800; letter-spacing:1px; text-transform:uppercase;">
-                        ELITE CENTRAL VACUUM
-                      </div>
+                    <!-- Brand Logo -->
+                    <div style="margin-bottom:14px; text-align:center;">
+                      <img src="${logoUrl}" alt="Elite Central Vacuum" style="height:48px; max-width:220px; object-fit:contain; display:inline-block; border:0; outline:none; text-decoration:none; color:#ffffff; font-weight:700; font-size:18px;" />
                     </div>
                     
                     ${
