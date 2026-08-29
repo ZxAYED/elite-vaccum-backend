@@ -21,6 +21,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Public } from 'src/common/decorator/rolesDecorator';
+import { CurrentUser, RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { AuthService } from './auth.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -212,12 +213,40 @@ export class AuthController {
 
   @Public()
   @Post('logout')
-  @ApiOperation({ summary: 'Logout user and clear the refresh token HttpOnly cookie' })
+  @ApiBearerAuth('JWT-auth')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({
+    summary: 'Logout user and clear the refresh token HttpOnly cookie',
+    description:
+      'Revokes active user session in database and clears the refresh token HttpOnly cookie. Requires an active Bearer access token or refreshToken cookie.',
+  })
   @ApiOkResponse({
     description: 'Logged out successfully.',
     type: MessageResponseDto,
   })
-  async logout(@Res({ passthrough: true }) res: Response) {
+  @ApiUnauthorizedResponse({
+    description: 'No active session or token found to log out.',
+  })
+  async logout(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @CurrentUser() user?: RequestUser | null,
+  ) {
+    const rawCookies = req.cookies as Record<string, string | undefined> | undefined;
+    const refreshToken =
+      rawCookies?.[REFRESH_COOKIE_NAME] || rawCookies?.['refresh_token'];
+
+    if (!user && !refreshToken) {
+      throw new UnauthorizedException(
+        'No active authentication token or session found to log out.',
+      );
+    }
+
+    await this.auth.logout({
+      userId: user?.id,
+      refreshToken,
+    });
+
     res.clearCookie(REFRESH_COOKIE_NAME, getRefreshCookieOptions());
     return { message: 'Logged out successfully' };
   }

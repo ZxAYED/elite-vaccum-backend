@@ -460,10 +460,28 @@ export class AuthService {
       data: { lastLoginAt: new Date() },
     });
 
+    const accessToken = await this.signAccessToken(user);
+    const refreshToken = await this.signRefreshToken(user);
+
+    // Record active session in database
+    await this.prisma.userSession.create({
+      data: {
+        userId: user.id,
+        refreshToken,
+        userAgent: _ctx?.userAgent
+          ? Array.isArray(_ctx.userAgent)
+            ? _ctx.userAgent[0]
+            : _ctx.userAgent
+          : null,
+        ipAddress: _ctx?.ip || null,
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      },
+    });
+
     return {
       user: this.toPublicUser(user),
-      accessToken: await this.signAccessToken(user),
-      refreshToken: await this.signRefreshToken(user),
+      accessToken,
+      refreshToken,
     };
   }
 
@@ -601,13 +619,55 @@ export class AuthService {
       throw new UnauthorizedException('Unauthorized');
     }
 
-    this.assertUserCanAuthenticate(user);
+    const session = await this.prisma.userSession.findUnique({
+      where: { refreshToken: params.refreshToken },
+    });
+
+    if (session && session.revokedAt) {
+      throw new UnauthorizedException(
+        'This session has been revoked. Please log in again.',
+      );
+    }
+
+    const newAccessToken = await this.signAccessToken(user);
+    const newRefreshToken = await this.signRefreshToken(user);
+
+    // Rotate session in database
+    await this.prisma.$transaction([
+      this.prisma.userSession.updateMany({
+        where: { refreshToken: params.refreshToken, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+      this.prisma.userSession.create({
+        data: {
+          userId: user.id,
+          refreshToken: newRefreshToken,
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        },
+      }),
+    ]);
 
     return {
       user: this.toPublicUser(user),
-      accessToken: await this.signAccessToken(user),
-      refreshToken: await this.signRefreshToken(user),
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
     };
+  }
+
+  async logout(params: { userId?: string; refreshToken?: string }) {
+    if (params.refreshToken) {
+      await this.prisma.userSession.updateMany({
+        where: { refreshToken: params.refreshToken, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    }
+    if (params.userId) {
+      await this.prisma.userSession.updateMany({
+        where: { userId: params.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    }
+    return { message: 'Logged out successfully' };
   }
 
   async me(userId?: string) {
