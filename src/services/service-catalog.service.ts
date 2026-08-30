@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, ServiceCatalogStatus, ServiceGroup } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { RedisService } from 'src/redis';
 import {
   FIXED_SERVICES_CATALOG,
   FixedServiceOffering,
@@ -16,7 +17,10 @@ import {
 export class ServiceCatalogService implements OnModuleInit {
   private readonly logger = new Logger(ServiceCatalogService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
 
   async onModuleInit() {
     // Auto-seed or synchronize database catalog on startup
@@ -27,8 +31,15 @@ export class ServiceCatalogService implements OnModuleInit {
 
   /**
    * Returns all 10 fixed services grouped by category along with symptom choices.
+   * Cached in Redis with 1-hour TTL.
    */
   async getCatalogGrouped() {
+    const cacheKey = 'services:catalog:grouped';
+    const cached = await this.redis.get<any>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     // Fetch live DB catalog if available, with fallback to constant
     let dbServices: any[] = [];
     try {
@@ -49,7 +60,7 @@ export class ServiceCatalogService implements OnModuleInit {
       (s) => s.group === ServiceGroup.INSTALLATION,
     ).map((s) => this.enrichOffering(s, dbServices));
 
-    return {
+    const result = {
       success: true,
       data: {
         serviceAndMaintenance,
@@ -72,14 +83,25 @@ export class ServiceCatalogService implements OnModuleInit {
         ],
       },
     };
+
+    await this.redis.set(cacheKey, result, 3600); // 1 hour TTL
+    return result;
   }
 
   /**
    * Retrieves specific service metadata by slug.
+   * Cached in Redis with 1-hour TTL.
    */
   async getServiceBySlug(slug: string) {
+    const cleanSlug = slug.toLowerCase().trim();
+    const cacheKey = `services:catalog:slug:${cleanSlug}`;
+    const cached = await this.redis.get<any>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const fixed = FIXED_SERVICES_CATALOG.find(
-      (s) => s.slug.toLowerCase() === slug.toLowerCase().trim(),
+      (s) => s.slug.toLowerCase() === cleanSlug,
     );
 
     if (!fixed) {
@@ -93,13 +115,16 @@ export class ServiceCatalogService implements OnModuleInit {
       })
       .catch(() => null);
 
-    return {
+    const result = {
       success: true,
       data: {
         ...this.enrichOffering(fixed, dbRecord ? [dbRecord] : []),
         symptoms: SYMPTOM_DEFINITIONS,
       },
     };
+
+    await this.redis.set(cacheKey, result, 3600); // 1 hour TTL
+    return result;
   }
 
   /**

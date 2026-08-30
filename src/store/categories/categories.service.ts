@@ -2,19 +2,27 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, ProductStatus, UserRole } from '@prisma/client';
+import * as crypto from 'crypto';
 import { RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { getPagination } from 'src/common/utils/pagination';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { RedisService } from 'src/redis';
 import { CategoryListQueryDto } from '../dto/category-list-query.dto';
 import { CreateCategoryDto } from '../dto/create-category.dto';
 import { UpdateCategoryDto } from '../dto/update-category.dto';
 
 @Injectable()
 export class StoreCategoriesService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(StoreCategoriesService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
 
   private isAdmin(user?: RequestUser | null): boolean {
     return user?.role === UserRole.ADMIN;
@@ -66,7 +74,7 @@ export class StoreCategoriesService {
       throw new ConflictException(`Category slug '${slug}' is already in use`);
     }
 
-    return this.prisma.productCategory.create({
+    const category = await this.prisma.productCategory.create({
       data: {
         name: dto.name.trim(),
         slug,
@@ -84,10 +92,25 @@ export class StoreCategoriesService {
         },
       },
     });
+
+    await this.invalidateCategoryCache(category.id, category.slug);
+    return category;
   }
 
   async getCategories(query: CategoryListQueryDto, user?: RequestUser | null) {
     const admin = this.isAdmin(user);
+
+    // Redis cache for public category queries (10 min TTL)
+    const cacheKey = !admin
+      ? `store:categories:list:${crypto.createHash('md5').update(JSON.stringify(query)).digest('hex')}`
+      : null;
+
+    if (cacheKey) {
+      const cached = await this.redis.get<any>(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    }
     const where: Prisma.ProductCategoryWhereInput = {
       ...(admin
         ? query.status
@@ -144,14 +167,32 @@ export class StoreCategoriesService {
           },
     });
 
-    return {
+    const result = {
       items,
       totalActiveProducts,
       meta,
     };
+
+    if (cacheKey) {
+      await this.redis.set(cacheKey, result, 600); // 10 minutes TTL
+    }
+
+    return result;
   }
 
   async getCategoryById(idOrSlug: string, user?: RequestUser | null) {
+    const admin = this.isAdmin(user);
+    const cacheKey = !admin
+      ? `store:categories:detail:${idOrSlug.toLowerCase().trim()}`
+      : null;
+
+    if (cacheKey) {
+      const cached = await this.redis.get<any>(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    }
+
     const isUuid =
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
         idOrSlug,
@@ -163,7 +204,7 @@ export class StoreCategoriesService {
         _count: {
           select: {
             products: {
-              where: this.isAdmin(user)
+              where: admin
                 ? undefined
                 : { status: ProductStatus.ACTIVE },
             },
@@ -176,8 +217,12 @@ export class StoreCategoriesService {
       throw new NotFoundException('Category not found');
     }
 
-    if (category.status !== 'ACTIVE' && !this.isAdmin(user)) {
+    if (category.status !== 'ACTIVE' && !admin) {
       throw new NotFoundException('Category is currently unavailable');
+    }
+
+    if (cacheKey && category) {
+      await this.redis.set(cacheKey, category, 600); // 10 minutes TTL
     }
 
     return category;
@@ -210,7 +255,7 @@ export class StoreCategoriesService {
       slug = await this.generateUniqueCategorySlug(dto.name, id);
     }
 
-    return this.prisma.productCategory.update({
+    const updated = await this.prisma.productCategory.update({
       where: { id },
       data: {
         ...(dto.name ? { name: dto.name.trim() } : {}),
@@ -231,6 +276,12 @@ export class StoreCategoriesService {
         },
       },
     });
+
+    await this.invalidateCategoryCache(id, existing.slug);
+    if (updated.slug !== existing.slug) {
+      await this.invalidateCategoryCache(id, updated.slug);
+    }
+    return updated;
   }
 
   async deleteCategory(id: string, user?: RequestUser | null) {
@@ -257,9 +308,34 @@ export class StoreCategoriesService {
       where: { id },
     });
 
+    await this.invalidateCategoryCache(id, existing.slug);
+
     return {
       success: true,
       message: `Category '${existing.name}' deleted successfully`,
     };
+  }
+
+  // ==========================================
+  // CACHE INVALIDATION HELPER
+  // ==========================================
+
+  async invalidateCategoryCache(categoryId?: string, slug?: string) {
+    try {
+      const keysToDelete: string[] = [];
+      if (categoryId) {
+        keysToDelete.push(`store:categories:detail:${categoryId.toLowerCase()}`);
+      }
+      if (slug) {
+        keysToDelete.push(`store:categories:detail:${slug.toLowerCase()}`);
+      }
+      if (keysToDelete.length > 0) {
+        await this.redis.del(...keysToDelete);
+      }
+      await this.redis.deleteByPattern('store:categories:*');
+      await this.redis.deleteByPattern('store:products:*');
+    } catch (err: any) {
+      this.logger.warn(`Redis category cache invalidation error: ${err.message}`);
+    }
   }
 }

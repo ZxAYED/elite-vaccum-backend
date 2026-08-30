@@ -19,6 +19,7 @@ import { RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { generateBusinessId } from 'src/common/utils/business-id.util';
 import { getPagination } from 'src/common/utils/pagination';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { RedisService } from 'src/redis';
 import { CloudinaryUploadService } from 'src/storage/cloudinary-upload.service';
 import { FIXED_SERVICES_CATALOG } from './constants/services-catalog.constant';
 import { AddServiceRequestAttachmentDto } from './dto/add-service-request-attachment.dto';
@@ -34,6 +35,7 @@ export class ServiceRequestsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cloudinary: CloudinaryUploadService,
+    private readonly redis: RedisService,
   ) {}
 
   private async uploadMulterFiles(
@@ -452,6 +454,13 @@ export class ServiceRequestsService {
         where: { id: request.id },
         include: this.requestInclude(),
       });
+
+      // Invalidate cached schedule slots for preferredDate
+      this.redis
+        .deleteByPattern(`schedule:slots:${dto.preferredDate}:*`)
+        .catch((err) => {
+          this.logger.warn(`Redis slot invalidation note: ${err.message}`);
+        });
 
       return {
         success: true,

@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -9,10 +10,12 @@ import {
   ProductStatus,
   UserRole,
 } from '@prisma/client';
+import * as crypto from 'crypto';
 import { RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { generateUniqueProductSku } from 'src/common/utils/generateSku';
 import { getPagination } from 'src/common/utils/pagination';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { RedisService } from 'src/redis';
 import { S3UploadService } from 'src/storage/s3-upload.service';
 import { CreateProductDto } from '../dto/create-product.dto';
 import { ProductListQueryDto } from '../dto/product-list-query.dto';
@@ -22,9 +25,12 @@ import { UpdateProductStockDto } from '../dto/update-product-stock.dto';
 
 @Injectable()
 export class StoreProductsService {
+  private readonly logger = new Logger(StoreProductsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly s3Service: S3UploadService,
+    private readonly redis: RedisService,
   ) {}
 
   private isAdmin(user?: RequestUser | null): boolean {
@@ -185,29 +191,41 @@ export class StoreProductsService {
       allImages[0].isPrimary = true;
     }
 
-    const quantity = dto.quantity ?? 1;
-    const availability =
-      dto.availability ?? this.calculateStockAvailability(quantity);
+    const initialQuantity = dto.quantity ?? 1;
+    const initialAvailability =
+      dto.availability ||
+      this.calculateStockAvailability(initialQuantity);
 
     // 5. Atomic Creation in Prisma Transaction
-    return this.prisma.$transaction(async (tx) => {
+    const product = await this.prisma.$transaction(async (tx) => {
       return tx.product.create({
         data: {
           categoryId: dto.categoryId,
           name: dto.name.trim(),
-          sku,
           model: dto.model?.trim() || null,
+          sku,
           summary: dto.summary.trim(),
           description: dto.description.trim(),
-          quantity,
+          quantity: initialQuantity,
           priceUsd: new Prisma.Decimal(dto.priceUsd),
-          status: dto.status ?? ProductStatus.ACTIVE,
-          availability,
+          status: dto.status || ProductStatus.ACTIVE,
+          availability: initialAvailability,
           taxable: dto.taxable ?? true,
           shippingLabel: dto.shippingLabel?.trim() || null,
           popularityRank: dto.popularityRank ?? 0,
-          imageAlt: dto.imageAlt?.trim() || dto.name.trim(),
-          images: allImages.length > 0 ? { create: allImages } : undefined,
+          imageAlt: dto.imageAlt?.trim() || `${dto.name} product photo`,
+          images:
+            allImages.length > 0
+              ? {
+                  create: allImages.map((img) => ({
+                    key: img.key,
+                    url: img.url,
+                    alt: img.alt,
+                    isPrimary: img.isPrimary,
+                    sortOrder: img.sortOrder,
+                  })),
+                }
+              : undefined,
           highlights:
             dto.highlights && dto.highlights.length > 0
               ? {
@@ -246,10 +264,25 @@ export class StoreProductsService {
         include: this.productInclude(),
       });
     });
+
+    await this.invalidateProductCache(product.id, product.sku);
+    return product;
   }
 
   async listProducts(query: ProductListQueryDto, user?: RequestUser | null) {
     const admin = this.isAdmin(user);
+
+    // Redis Cache for public catalog queries (5 min TTL)
+    const cacheKey = !admin
+      ? `store:products:list:${crypto.createHash('md5').update(JSON.stringify(query)).digest('hex')}`
+      : null;
+
+    if (cacheKey) {
+      const cached = await this.redis.get<any>(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    }
 
     // 1. Status condition: Public users only ever see ACTIVE products in ACTIVE categories
     const statusCondition: Prisma.ProductWhereInput = admin
@@ -415,10 +448,16 @@ export class StoreProductsService {
       include: this.productInclude(),
     });
 
-    return {
+    const result = {
       items,
       meta,
     };
+
+    if (cacheKey) {
+      await this.redis.set(cacheKey, result, 300); // 5 minutes TTL
+    }
+
+    return result;
   }
 
   async getAdminProducts(
@@ -432,6 +471,18 @@ export class StoreProductsService {
   }
 
   async getProductById(idOrSku: string, user?: RequestUser | null) {
+    const admin = this.isAdmin(user);
+    const cacheKey = !admin
+      ? `store:products:detail:${idOrSku.toLowerCase().trim()}`
+      : null;
+
+    if (cacheKey) {
+      const cached = await this.redis.get<any>(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    }
+
     const isUuid = this.isUuid(idOrSku);
 
     const product = await this.prisma.product.findFirst({
@@ -444,13 +495,17 @@ export class StoreProductsService {
     }
 
     // Public visitors cannot access draft, archived, or inactive category products
-    if (!this.isAdmin(user)) {
+    if (!admin) {
       if (product.status !== ProductStatus.ACTIVE) {
         throw new NotFoundException('Product is not currently available');
       }
       if (product.category.status !== 'ACTIVE') {
         throw new NotFoundException('Product category is not currently available');
       }
+    }
+
+    if (cacheKey && product) {
+      await this.redis.set(cacheKey, product, 600); // 10 minutes TTL
     }
 
     return product;
@@ -649,6 +704,7 @@ export class StoreProductsService {
         await this.s3Service.deleteFiles(imagesToDeleteS3Keys);
       }
 
+      await this.invalidateProductCache(updatedProduct.id, updatedProduct.sku);
       return updatedProduct;
     });
   }
@@ -691,6 +747,8 @@ export class StoreProductsService {
       await this.s3Service.deleteFiles(s3Keys);
     }
 
+    await this.invalidateProductCache(productId, product.sku);
+
     return {
       success: true,
       message: `Successfully deleted ${deleteIds.length} image(s)`,
@@ -726,6 +784,8 @@ export class StoreProductsService {
         include: this.productInclude(),
       });
 
+      await this.invalidateProductCache(id, product.sku);
+
       return {
         success: true,
         message: `Product has existing orders and was safely ARCHIVED instead of hard deleted.`,
@@ -748,6 +808,8 @@ export class StoreProductsService {
       await this.s3Service.deleteFiles(imageKeys);
     }
 
+    await this.invalidateProductCache(id, product.sku);
+
     return {
       success: true,
       message: `Product '${product.name}' and its images were permanently deleted.`,
@@ -764,7 +826,7 @@ export class StoreProductsService {
       throw new NotFoundException('Product not found');
     }
 
-    return this.prisma.product.update({
+    const updated = await this.prisma.product.update({
       where: { id },
       data: {
         status: dto.status,
@@ -772,6 +834,9 @@ export class StoreProductsService {
       },
       include: this.productInclude(),
     });
+
+    await this.invalidateProductCache(id, product.sku);
+    return updated;
   }
 
   async updateProductStock(
@@ -787,7 +852,7 @@ export class StoreProductsService {
     const availability =
       dto.availability ?? this.calculateStockAvailability(dto.quantity);
 
-    return this.prisma.product.update({
+    const updated = await this.prisma.product.update({
       where: { id },
       data: {
         quantity: dto.quantity,
@@ -795,6 +860,9 @@ export class StoreProductsService {
       },
       include: this.productInclude(),
     });
+
+    await this.invalidateProductCache(id, product.sku);
+    return updated;
   }
 
   /**
@@ -808,7 +876,7 @@ export class StoreProductsService {
     const client = tx || this.prisma;
     const product = await client.product.findUnique({
       where: { id: productId },
-      select: { id: true, name: true, quantity: true, availability: true },
+      select: { id: true, name: true, sku: true, quantity: true, availability: true },
     });
 
     if (!product) {
@@ -827,13 +895,16 @@ export class StoreProductsService {
       product.availability,
     );
 
-    return client.product.update({
+    const updated = await client.product.update({
       where: { id: productId },
       data: {
         quantity: newQuantity,
         availability: newAvailability,
       },
     });
+
+    await this.invalidateProductCache(productId, product.sku);
+    return updated;
   }
 
   /**
@@ -847,7 +918,7 @@ export class StoreProductsService {
     const client = tx || this.prisma;
     const product = await client.product.findUnique({
       where: { id: productId },
-      select: { id: true, quantity: true, availability: true },
+      select: { id: true, sku: true, quantity: true, availability: true },
     });
 
     if (!product) {
@@ -860,12 +931,41 @@ export class StoreProductsService {
       product.availability,
     );
 
-    return client.product.update({
+    const updated = await client.product.update({
       where: { id: productId },
       data: {
         quantity: newQuantity,
         availability: newAvailability,
       },
     });
+
+    await this.invalidateProductCache(productId, product.sku);
+    return updated;
+  }
+
+  // ==========================================
+  // CACHE INVALIDATION HELPER
+  // ==========================================
+
+  /**
+   * Invalidates Redis cache for product details and public product listings.
+   */
+  async invalidateProductCache(productId?: string | null, sku?: string | null) {
+    try {
+      const keysToDelete: string[] = [];
+      if (productId) {
+        keysToDelete.push(`store:products:detail:${productId.toLowerCase()}`);
+      }
+      if (sku) {
+        keysToDelete.push(`store:products:detail:${sku.toLowerCase()}`);
+      }
+      if (keysToDelete.length > 0) {
+        await this.redis.del(...keysToDelete);
+      }
+      await this.redis.deleteByPattern('store:products:list:*');
+      await this.redis.deleteByPattern('store:categories:*');
+    } catch (err: any) {
+      this.logger.warn(`Redis product cache invalidation error: ${err.message}`);
+    }
   }
 }

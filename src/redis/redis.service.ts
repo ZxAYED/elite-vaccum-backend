@@ -165,6 +165,26 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Deletes all keys matching a glob-style pattern (e.g. 'store:products:*').
+   */
+  async deleteByPattern(pattern: string): Promise<number> {
+    try {
+      const matchedKeys = await this.client.keys(pattern);
+      if (!matchedKeys || matchedKeys.length === 0) return 0;
+
+      const prefix = (this.client.options as any).keyPrefix || '';
+      const cleanKeys = matchedKeys.map((k) =>
+        prefix && k.startsWith(prefix) ? k.slice(prefix.length) : k,
+      );
+
+      return await this.client.del(...cleanKeys);
+    } catch (err: any) {
+      this.logger.error(`Redis deleteByPattern failed for '${pattern}': ${err.message}`);
+      return 0;
+    }
+  }
+
+  /**
    * Atomic increment.
    */
   async incr(key: string): Promise<number> {

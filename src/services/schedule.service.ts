@@ -7,6 +7,7 @@ import {
 import { Prisma, ServiceOrderStatus, ServiceRequestStatus } from '@prisma/client';
 import { RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { RedisService } from 'src/redis';
 import { STANDARD_TIME_SLOTS } from './constants/services-catalog.constant';
 import { AssignTechnicianDto } from './dto/assign-technician.dto';
 import { AvailableSlotsQueryDto, ScheduleBoardQueryDto } from './dto/available-slots-query.dto';
@@ -18,7 +19,10 @@ import { UpdateScheduleDto } from './dto/update-schedule.dto';
 export class ScheduleService {
   private readonly logger = new Logger(ScheduleService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
 
   /**
    * Helper to parse date and 12-hour time string into a Date object.
@@ -90,9 +94,17 @@ export class ScheduleService {
 
   /**
    * Returns daily booking slots for a given date with explicit FREE vs BOOKED status on every slot.
+   * Cached in Redis with 60 seconds TTL.
    */
   async getDailySlots(query: AvailableSlotsQueryDto) {
     const targetDate = query.date.trim();
+    const cacheKey = `schedule:slots:${targetDate}:${query.technicianId || 'all'}`;
+
+    const cached = await this.redis.get<any>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const [year, month, day] = targetDate.split('-').map(Number);
 
     const startOfDay = new Date(Date.UTC(year, month - 1, day, 0, 0, 0));
@@ -153,7 +165,7 @@ export class ScheduleService {
       };
     });
 
-    return {
+    const result = {
       success: true,
       date: targetDate,
       totalSlots: slots.length,
@@ -161,6 +173,9 @@ export class ScheduleService {
       bookedSlotsCount: slots.filter((s) => s.isBooked).length,
       slots,
     };
+
+    await this.redis.set(cacheKey, result, 60); // 60 seconds TTL
+    return result;
   }
 
   // ==========================================
@@ -335,6 +350,8 @@ export class ScheduleService {
         `Appointment scheduled for ${dto.date} (${dto.startTime} - ${dto.endTime}) by Admin (${user.email})`,
       );
 
+      await this.invalidateSlotCache(dto.date);
+
       return {
         success: true,
         message: 'Appointment successfully created and dispatched',
@@ -444,6 +461,9 @@ export class ScheduleService {
       return app;
     });
 
+    const targetDateStr = (dto.date || appointment.startAt.toISOString().slice(0, 10));
+    await this.invalidateSlotCache(targetDateStr);
+
     return {
       success: true,
       message: 'Appointment schedule updated successfully',
@@ -520,6 +540,9 @@ export class ScheduleService {
       return app;
     });
 
+    const targetDateStr = appointment.startAt.toISOString().slice(0, 10);
+    await this.invalidateSlotCache(targetDateStr);
+
     return {
       success: true,
       message: `Technician '${tech.displayName}' successfully assigned to appointment`,
@@ -551,10 +574,29 @@ export class ScheduleService {
       include: this.appointmentInclude(),
     });
 
+    const targetDateStr = appointment.startAt.toISOString().slice(0, 10);
+    await this.invalidateSlotCache(targetDateStr);
+
     return {
       success: true,
       message: 'Appointment cancelled successfully',
       appointment: updated,
     };
+  }
+
+  // ==========================================
+  // CACHE INVALIDATION HELPER
+  // ==========================================
+
+  async invalidateSlotCache(dateStr?: string) {
+    try {
+      if (dateStr) {
+        await this.redis.deleteByPattern(`schedule:slots:${dateStr}:*`);
+      } else {
+        await this.redis.deleteByPattern('schedule:slots:*');
+      }
+    } catch (err: any) {
+      this.logger.warn(`Redis slot cache invalidation error: ${err.message}`);
+    }
   }
 }
