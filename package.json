@@ -30,7 +30,8 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:store": "ts-node -r tsconfig-paths/register scripts/test-store-apis.ts",
     "test:services": "ts-node -r tsconfig-paths/register scripts/test-services-apis.ts",
-    "test:platform": "ts-node -r dotenv/config -r tsconfig-paths/register scripts/test-all-platform-apis.ts"
+    "test:platform": "ts-node -r dotenv/config -r tsconfig-paths/register scripts/test-all-platform-apis.ts",
+    "test:redis": "ts-node -r dotenv/config scripts/test-redis.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1031.0",

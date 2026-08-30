@@ -37,8 +37,10 @@ export function resolveRedisOptions(configService?: ConfigService): RedisModuleO
   };
 
   if (redisUrl) {
+    const isTls = redisUrl.startsWith('rediss://');
     return {
       url: redisUrl,
+      ...(isTls ? { tls: { rejectUnauthorized: false } } : {}),
       ...commonOptions,
     };
   }
@@ -64,7 +66,8 @@ export function createRedisClient(options: RedisModuleOptions, label = 'Main'): 
   let client: Redis;
 
   if (options.url) {
-    client = new Redis(options.url, options);
+    const { url, ...cleanOptions } = options;
+    client = new Redis(url, cleanOptions);
   } else {
     client = new Redis(options);
   }
