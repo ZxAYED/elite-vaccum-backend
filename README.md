@@ -23,6 +23,7 @@ Modern enterprise backend built with **NestJS**, **PostgreSQL**, **Prisma ORM**,
 Detailed domain API guides are available in the `/docs` directory:
 - 📖 [**Services, Scheduling & Operations Guide**](./docs/SERVICE_API_GUIDE.md)
 - 🛒 [**Store, Products, Cart & Orders Guide**](./docs/STORE_API_GUIDE.md)
+- ⚡ [**Reusable Redis, Pub/Sub, Presence & BullMQ Guide**](./docs/REDIS_GUIDE.md)
 
 ---
 

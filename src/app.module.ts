@@ -12,6 +12,7 @@ import { EmailModule } from './email/email.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { QuotationsModule } from './quotations/quotations.module';
+import { RedisModule } from './redis/redis.module';
 import { ReportsModule } from './reports/reports.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { ServiceOrdersModule } from './service-orders/service-orders.module';
@@ -49,6 +50,7 @@ import { TechniciansModule } from './technicians/technicians.module';
       },
     }),
     PrismaModule,
+    RedisModule,
     EmailModule,
     StorageModule,
     NotificationsModule,
