@@ -404,28 +404,8 @@ export class QuotationsService {
   }
 
   // ==========================================
-  // SEND / ACCEPT / REJECT
+  // ACCEPT / REJECT / STATUS
   // ==========================================
-
-  async send(id: string, user: RequestUser) {
-    const existing = await this.prisma.quotation.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException('Quotation not found');
-
-    const updated = await this.prisma.quotation.update({
-      where: { id },
-      data: {
-        status: QuotationStatus.SENT,
-        sentAt: new Date(),
-      },
-      include: this.quotationInclude(),
-    });
-
-    return {
-      success: true,
-      message: 'Quotation sent to customer',
-      quotation: updated,
-    };
-  }
 
   async accept(id: string, user: RequestUser) {
     if (!user) {

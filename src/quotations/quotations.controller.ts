@@ -101,17 +101,6 @@ export class QuotationsController {
     return this.quotationsService.updateStatus(id, dto, user);
   }
 
-  @Post(':id/send')
-  @Roles('ADMIN')
-  @ApiOperation({ summary: 'Admin: Re-send quotation notification to customer' })
-  @ApiResponse({ status: 200, description: 'Quotation notification re-sent' })
-  async send(
-    @Param('id') id: string,
-    @CurrentUser() user: RequestUser,
-  ) {
-    return this.quotationsService.send(id, user);
-  }
-
   @Post(':id/accept')
   @Roles('CUSTOMER')
   @ApiOperation({

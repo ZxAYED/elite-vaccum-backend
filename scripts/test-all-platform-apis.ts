@@ -205,20 +205,14 @@ async function bootstrap() {
     const quoteId = quoteRes.body.quotation.id;
     console.log('✅ POST /quotations:', quoteRes.body.quotation.businessId, `Total: $${quoteRes.body.quotation.totalUsd}`);
 
-    // Admin sends quotation
-    await supertest(server)
-      .post(`/quotations/${quoteId}/send`)
-      .set('Authorization', adminAuth)
-      .expect(200);
-    console.log('✅ POST /quotations/:id/send: SENT');
-
-    // Customer accepts quotation -> auto-creates Service Order
+    // Customer accepts quotation via unified PATCH /status -> auto-creates Service Order
     const acceptRes = await supertest(server)
-      .post(`/quotations/${quoteId}/accept`)
+      .patch(`/quotations/${quoteId}/status`)
       .set('Authorization', customerAuth)
+      .send({ action: 'ACCEPTED' })
       .expect(200);
     const serviceOrderId = acceptRes.body.serviceOrder.id;
-    console.log('✅ POST /quotations/:id/accept: Service Order Generated', acceptRes.body.serviceOrder.businessId);
+    console.log('✅ PATCH /quotations/:id/status (ACCEPTED): Service Order Generated', acceptRes.body.serviceOrder.businessId);
 
     // 5. Service Order Execution & Dispatch
     console.log('\n--- 5. SERVICE ORDER EXECUTION & DISPATCH ---');

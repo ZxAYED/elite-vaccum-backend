@@ -198,8 +198,6 @@ Service Request (REQ) ──► Admin Creates Quote (Auto-Sent to Customer) ─�
   - **Automatically sets status to `SENT` and immediately dispatches an email notification to the customer**.
 * **`PATCH /quotations/:id`** (Admin)
   - Revises quotation. Automatically captures versioned snapshot in `QuotationRevision`.
-* **`POST /quotations/:id/send`** (Admin)
-  - Re-sends quotation email reminder to the customer.
 * **`GET /quotations/me`** (Customer) & **`GET /quotations`** (Admin)
   - List quotations.
 * **`PATCH /quotations/:id/status`** (**Customer Only** - `@Roles('CUSTOMER')`)
