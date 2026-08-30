@@ -190,21 +190,24 @@ The schedule is created **directly by the customer** during intake submission. A
 ## 6. Quotations Lifecycle
 
 ```
-Service Request (REQ) ──► Admin Creates Quote (QUO) ──► Sent to Customer ──► Customer Accepts ──► Auto-Created Service Order (SO)
+Service Request (REQ) ──► Admin Creates Quote (Auto-Sent to Customer) ──► Customer Accepts ──► Auto-Created Service Order (SO)
 ```
 
 * **`POST /quotations`** (Admin)
   - Creates itemized quote linked to `serviceRequestId` with line items, discount, tax, total (`QUO-XXXXX`).
+  - **Automatically sets status to `SENT` and immediately dispatches an email notification to the customer**.
 * **`PATCH /quotations/:id`** (Admin)
   - Revises quotation. Automatically captures versioned snapshot in `QuotationRevision`.
 * **`POST /quotations/:id/send`** (Admin)
-  - Sends quote to customer (`status: "SENT"`).
+  - Re-sends quotation email reminder to the customer.
 * **`GET /quotations/me`** (Customer) & **`GET /quotations`** (Admin)
   - List quotations.
-* **`POST /quotations/:id/accept`** (Customer)
-  - **Accepts quote, automatically creates a `ServiceOrder` (`SO-XXXXX`, status: `SCHEDULED`), and marks the parent `ServiceRequest` as `ACCEPTED`**.
-* **`POST /quotations/:id/reject`** (Customer)
-  - Customer rejects quote with feedback reason.
+* **`POST /quotations/:id/accept`** (**Customer Only** - `@Roles('CUSTOMER')`)
+  - **Only the customer who received this quotation can accept it**. Admin cannot accept.
+  - Automatically transitions quotation to `ACCEPTED`, **automatically provisions a scheduled `ServiceOrder` (`SO-XXXXX`)**, and marks the parent `ServiceRequest` as `ACCEPTED`.
+* **`POST /quotations/:id/reject`** (**Customer Only** - `@Roles('CUSTOMER')`)
+  - **Only the customer who received this quotation can reject it**. Admin cannot reject.
+  - Records customer rejection reason in audit history.
 
 ---
 

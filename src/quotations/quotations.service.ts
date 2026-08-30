@@ -15,6 +15,8 @@ import {
 import { RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { generateBusinessId } from 'src/common/utils/business-id.util';
 import { getPagination } from 'src/common/utils/pagination';
+import { EmailService } from 'src/email/email.service';
+import { EmailTemplateKey } from 'src/email/types/email.types';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateQuotationDto } from './dto/create-quotation.dto';
 import {
@@ -27,7 +29,10 @@ import {
 export class QuotationsService {
   private readonly logger = new Logger(QuotationsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly emailService: EmailService,
+  ) {}
 
   private isAdmin(user?: RequestUser | null) {
     return user?.role === UserRole.ADMIN;
@@ -138,7 +143,8 @@ export class QuotationsService {
           serviceRequestId: serviceRequest.id,
           customerId: serviceRequest.customerId,
           serviceId: serviceRequest.serviceId,
-          status: QuotationStatus.DRAFT,
+          status: QuotationStatus.SENT,
+          sentAt: new Date(),
           version: 1,
           subtotalUsd: new Prisma.Decimal(subtotal),
           discountUsd: new Prisma.Decimal(discount),
@@ -169,11 +175,27 @@ export class QuotationsService {
         },
       });
 
-      this.logger.log(`Quotation '${quotation.businessId}' created by Admin (${user.email})`);
+      this.logger.log(`Quotation '${quotation.businessId}' created and automatically sent to customer (${serviceRequest.customer?.email}) by Admin (${user.email})`);
+
+      // Dispatch quotation notification email to customer
+      if (serviceRequest.customer?.email) {
+        this.emailService
+          .sendTemplateEmail({
+            to: serviceRequest.customer.email,
+            template: EmailTemplateKey.QUOTATION_EVENT,
+            payload: {
+              subject: `Quotation Prepared for Service Request ${serviceRequest.businessId}`,
+              message: `A new itemized quotation (${quotation.businessId}) totaling $${total.toFixed(2)} USD has been prepared and sent for your review. Please sign in to your account to review and accept.`,
+            },
+          })
+          .catch((err) => {
+            this.logger.warn(`Failed to dispatch quotation notification email to ${serviceRequest.customer?.email}: ${err.message}`);
+          });
+      }
 
       return {
         success: true,
-        message: 'Quotation created successfully',
+        message: 'Quotation created and sent to customer successfully',
         quotation,
       };
     });
@@ -404,12 +426,27 @@ export class QuotationsService {
   }
 
   async accept(id: string, user: RequestUser) {
+    if (!user) {
+      throw new ForbiddenException('Authentication is required');
+    }
+
+    if (this.isAdmin(user)) {
+      throw new ForbiddenException('Admin cannot accept quotations. Only the customer can accept this quotation.');
+    }
+
     const quotation = await this.prisma.quotation.findUnique({
       where: { id },
       include: { serviceRequest: true, customer: true, lineItems: true },
     });
 
     if (!quotation) throw new NotFoundException('Quotation not found');
+
+    if (
+      quotation.customer.userId !== user.id &&
+      quotation.customer.email.toLowerCase() !== user.email?.toLowerCase()
+    ) {
+      throw new ForbiddenException('You do not have permission to accept this quotation');
+    }
 
     if (quotation.status === QuotationStatus.ACCEPTED) {
       throw new BadRequestException('Quotation has already been accepted');
@@ -483,8 +520,31 @@ export class QuotationsService {
   }
 
   async reject(id: string, dto: RejectQuotationDto, user: RequestUser) {
-    const quotation = await this.prisma.quotation.findUnique({ where: { id } });
+    if (!user) {
+      throw new ForbiddenException('Authentication is required');
+    }
+
+    if (this.isAdmin(user)) {
+      throw new ForbiddenException('Admin cannot reject quotations. Only the customer can reject this quotation.');
+    }
+
+    const quotation = await this.prisma.quotation.findUnique({
+      where: { id },
+      include: { customer: true },
+    });
+
     if (!quotation) throw new NotFoundException('Quotation not found');
+
+    if (
+      quotation.customer.userId !== user.id &&
+      quotation.customer.email.toLowerCase() !== user.email?.toLowerCase()
+    ) {
+      throw new ForbiddenException('You do not have permission to reject this quotation');
+    }
+
+    if (quotation.status === QuotationStatus.ACCEPTED) {
+      throw new BadRequestException('Cannot reject an already accepted quotation');
+    }
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.quotation.update({
@@ -500,7 +560,7 @@ export class QuotationsService {
           quotationId: id,
           reason: dto.reason.trim(),
           comments: dto.comments?.trim() || null,
-          actorLabel: `${user.role} (${user.email})`,
+          actorLabel: `Customer (${user.email})`,
         },
       });
 

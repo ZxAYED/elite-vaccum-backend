@@ -61,8 +61,11 @@ export class QuotationsController {
 
   @Post()
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Admin: Create itemized quotation for a service request' })
-  @ApiResponse({ status: 201, description: 'Quotation created' })
+  @ApiOperation({
+    summary: 'Admin: Create itemized quotation for a service request (auto-sent to customer)',
+    description: 'Creates itemized quotation, sets status to SENT, updates service request status to QUOTED, and auto-dispatches email notification to customer.',
+  })
+  @ApiResponse({ status: 201, description: 'Quotation created and sent to customer' })
   async create(
     @Body() dto: CreateQuotationDto,
     @CurrentUser() user: RequestUser,
@@ -84,8 +87,8 @@ export class QuotationsController {
 
   @Post(':id/send')
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Admin: Send quotation to customer' })
-  @ApiResponse({ status: 200, description: 'Quotation sent' })
+  @ApiOperation({ summary: 'Admin: Re-send quotation notification to customer' })
+  @ApiResponse({ status: 200, description: 'Quotation notification re-sent' })
   async send(
     @Param('id') id: string,
     @CurrentUser() user: RequestUser,
@@ -94,8 +97,11 @@ export class QuotationsController {
   }
 
   @Post(':id/accept')
-  @Roles('CUSTOMER', 'ADMIN')
-  @ApiOperation({ summary: 'Customer / Admin: Accept quotation and auto-generate Service Order' })
+  @Roles('CUSTOMER')
+  @ApiOperation({
+    summary: 'Customer Only: Accept quotation and auto-generate Service Order',
+    description: 'Only the customer who received this quotation can accept it. Automatically transitions status to ACCEPTED and auto-generates a scheduled Service Order.',
+  })
   @ApiResponse({ status: 200, description: 'Quotation accepted and Service Order generated' })
   async accept(
     @Param('id') id: string,
@@ -105,8 +111,11 @@ export class QuotationsController {
   }
 
   @Post(':id/reject')
-  @Roles('CUSTOMER', 'ADMIN')
-  @ApiOperation({ summary: 'Customer / Admin: Reject quotation with reason note' })
+  @Roles('CUSTOMER')
+  @ApiOperation({
+    summary: 'Customer Only: Reject quotation with reason note',
+    description: 'Only the customer who received this quotation can reject it. Transitions status to REJECTED and records audit history.',
+  })
   @ApiResponse({ status: 200, description: 'Quotation rejected' })
   async reject(
     @Param('id') id: string,
