@@ -20,6 +20,7 @@ import {
   QuotationListQueryDto,
   RejectQuotationDto,
   UpdateQuotationDto,
+  UpdateQuotationStatusDto,
 } from './dto/update-quotation.dto';
 import { QuotationsService } from './quotations.service';
 
@@ -83,6 +84,21 @@ export class QuotationsController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.quotationsService.update(id, dto, user);
+  }
+
+  @Patch(':id/status')
+  @Roles('CUSTOMER')
+  @ApiOperation({
+    summary: 'Customer Only: Update quotation status (ACCEPT or REJECT via action enum in body)',
+    description: 'Single unified endpoint for customers to either accept (auto-provisions Service Order) or reject a quotation.',
+  })
+  @ApiResponse({ status: 200, description: 'Quotation status updated successfully' })
+  async updateStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateQuotationStatusDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.quotationsService.updateStatus(id, dto, user);
   }
 
   @Post(':id/send')

@@ -190,7 +190,7 @@ The schedule is created **directly by the customer** during intake submission. A
 ## 6. Quotations Lifecycle
 
 ```
-Service Request (REQ) ──► Admin Creates Quote (Auto-Sent to Customer) ──► Customer Accepts ──► Auto-Created Service Order (SO)
+Service Request (REQ) ──► Admin Creates Quote (Auto-Sent to Customer) ──► Customer Decision (PATCH /status) ──► Auto-Created Service Order (SO)
 ```
 
 * **`POST /quotations`** (Admin)
@@ -202,12 +202,26 @@ Service Request (REQ) ──► Admin Creates Quote (Auto-Sent to Customer) ─�
   - Re-sends quotation email reminder to the customer.
 * **`GET /quotations/me`** (Customer) & **`GET /quotations`** (Admin)
   - List quotations.
-* **`POST /quotations/:id/accept`** (**Customer Only** - `@Roles('CUSTOMER')`)
-  - **Only the customer who received this quotation can accept it**. Admin cannot accept.
-  - Automatically transitions quotation to `ACCEPTED`, **automatically provisions a scheduled `ServiceOrder` (`SO-XXXXX`)**, and marks the parent `ServiceRequest` as `ACCEPTED`.
-* **`POST /quotations/:id/reject`** (**Customer Only** - `@Roles('CUSTOMER')`)
-  - **Only the customer who received this quotation can reject it**. Admin cannot reject.
-  - Records customer rejection reason in audit history.
+* **`PATCH /quotations/:id/status`** (**Customer Only** - `@Roles('CUSTOMER')`)
+  - **Single Unified Decision API**: Customer submits their decision in the body via enum (`ACCEPTED` or `REJECTED`).
+  - **Payload for Acceptance**:
+    ```json
+    {
+      "action": "ACCEPTED"
+    }
+    ```
+    *Result*: Quotation transitions to `ACCEPTED`, **automatically provisions a scheduled `ServiceOrder` (`SO-XXXXX`)**, and marks parent `ServiceRequest` as `ACCEPTED`.
+  - **Payload for Rejection**:
+    ```json
+    {
+      "action": "REJECTED",
+      "reason": "Price exceeds budget",
+      "comments": "Looking for basic diagnostic only"
+    }
+    ```
+    *Result*: Transitions quotation to `REJECTED` and records rejection history in audit table.
+* **`POST /quotations/:id/accept`** & **`POST /quotations/:id/reject`** (Customer Only)
+  - Retained as direct aliases to `PATCH /status`.
 
 ---
 

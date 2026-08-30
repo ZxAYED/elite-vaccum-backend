@@ -1,4 +1,4 @@
-import { ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { QuotationStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
@@ -44,6 +44,38 @@ export class QuotationListQueryDto {
   @IsOptional()
   @IsString()
   readonly search?: string;
+}
+
+export enum QuotationDecisionAction {
+  ACCEPTED = 'ACCEPTED',
+  REJECTED = 'REJECTED',
+}
+
+export class UpdateQuotationStatusDto {
+  @ApiProperty({
+    enum: QuotationDecisionAction,
+    example: QuotationDecisionAction.ACCEPTED,
+    description: 'Decision action to accept or reject the quotation',
+  })
+  @IsEnum(QuotationDecisionAction)
+  @IsNotEmpty()
+  readonly action!: QuotationDecisionAction;
+
+  @ApiPropertyOptional({
+    example: 'Budget constraints / Found alternative option',
+    description: 'Rejection reason (used if action is REJECTED)',
+  })
+  @IsOptional()
+  @IsString()
+  readonly reason?: string;
+
+  @ApiPropertyOptional({
+    example: 'Customer notes or feedback',
+    description: 'Additional comments',
+  })
+  @IsOptional()
+  @IsString()
+  readonly comments?: string;
 }
 
 export class RejectQuotationDto {

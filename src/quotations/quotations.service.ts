@@ -20,9 +20,11 @@ import { EmailTemplateKey } from 'src/email/types/email.types';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateQuotationDto } from './dto/create-quotation.dto';
 import {
+  QuotationDecisionAction,
   QuotationListQueryDto,
   RejectQuotationDto,
   UpdateQuotationDto,
+  UpdateQuotationStatusDto,
 } from './dto/update-quotation.dto';
 
 @Injectable()
@@ -575,5 +577,26 @@ export class QuotationsService {
         quotation: fullQuotation,
       };
     });
+  }
+
+  // ==========================================
+  // UNIFIED STATUS / DECISION ENDPOINT
+  // ==========================================
+
+  async updateStatus(
+    id: string,
+    dto: UpdateQuotationStatusDto,
+    user: RequestUser,
+  ) {
+    if (dto.action === QuotationDecisionAction.ACCEPTED) {
+      return this.accept(id, user);
+    }
+
+    if (dto.action === QuotationDecisionAction.REJECTED) {
+      const reason = dto.reason?.trim() || 'Declined by customer';
+      return this.reject(id, { reason, comments: dto.comments }, user);
+    }
+
+    throw new BadRequestException(`Invalid quotation decision action '${(dto as any).action}'`);
   }
 }
