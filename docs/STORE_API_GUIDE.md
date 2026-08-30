@@ -1,43 +1,54 @@
 # Elite Central Vacuum - Store & E-Commerce API Guide
 
-This is the comprehensive API guide for the **Store, Products, Cart, Checkout, Delivery Addresses, Orders, Invoices, Returns, Product Reviews, and Sales Analytics** domain of the Elite Central Vacuum platform.
+This is the comprehensive API guide for the **Store, Products Catalog, Categories, Shopping Cart, Delivery Addresses, Checkout & Orders, Invoices, Returns, Product Reviews, and Sales Analytics** domain of the Elite Central Vacuum platform.
 
 ---
 
 ## Table of Contents
-1. [Authentication & Profile Headers](#1-authentication--profile-headers)
+1. [Authentication & Session Lifecycle](#1-authentication--session-lifecycle)
 2. [Product Categories](#2-product-categories)
 3. [Products Catalog & Search](#3-products-catalog--search)
 4. [Shopping Cart](#4-shopping-cart)
 5. [Delivery Addresses](#5-delivery-addresses)
 6. [Orders & Checkout (Stripe & COD)](#6-orders--checkout-stripe--cod)
-7. [Store Invoices & Downloads](#7-store-invoices--downloads)
+7. [Store Invoices & PDF Downloads](#7-store-invoices--pdf-downloads)
 8. [Product Returns & Refunds](#8-product-returns--refunds)
 9. [Product Customer Reviews](#9-product-customer-reviews)
 10. [Store Analytics & Sales Reports](#10-store-analytics--sales-reports)
 
 ---
 
-## 1. Authentication & Profile Headers
+## 1. Authentication & Session Lifecycle
 
 - **Base URL**: `http://localhost:3000`
-- **Swagger Documentation**: `http://localhost:3000/docs`
+- **Swagger Documentation**: `http://localhost:3000/docs` (Dark Mode UI with Bearer Token Input)
 - **Auth Header**: `Authorization: Bearer <JWT_ACCESS_TOKEN>`
 
 ### Authentication Endpoints
 * **`POST /auth/signup`** (Public)
-  - Registers a new customer account and sends email OTP verification.
-  - Body: `{ "email": "user@example.com", "password": "Password123!", "firstName": "John", "lastName": "Doe", "phone": "+1-555-123-4567" }`
+  - Registers a new customer account and sends an email OTP verification code.
+  - Body:
+    ```json
+    {
+      "email": "user@example.com",
+      "password": "Password123!",
+      "firstName": "John",
+      "lastName": "Doe",
+      "phone": "+1-555-123-4567"
+    }
+    ```
 * **`POST /auth/verify-otp`** (Public)
-  - Verifies email code and returns access token + refresh token.
+  - Verifies email code and returns `accessToken` + sets HttpOnly `refreshToken` cookie.
   - Body: `{ "email": "user@example.com", "code": "123456", "purpose": "EMAIL_VERIFICATION" }`
 * **`POST /auth/login`** (Public)
-  - Authenticates user and returns JWT payload.
+  - Authenticates user, creates active `UserSession` record in database, and returns JWT tokens.
   - Body: `{ "email": "user@example.com", "password": "Password123!" }`
-* **`POST /auth/refresh-token`** (Public)
-  - Refreshes expired access token using refresh token.
+* **`POST /auth/logout`** (**Authenticated**)
+  - Validates caller session and revokes the active session (`revokedAt: new Date()`) in PostgreSQL.
+* **`POST /auth/refresh-token`** (Public / Cookie-based)
+  - Refreshes expired access token using valid refresh token cookie.
 * **`GET /auth/me`** (Authenticated)
-  - Returns authenticated user details and active profile.
+  - Returns authenticated user details, customer record, and role.
 
 ---
 
@@ -58,52 +69,54 @@ This is the comprehensive API guide for the **Store, Products, Cart, Checkout, D
   - **Query Parameters**:
     - `search`: Full text search on name, summary, description, and SKU.
     - `categoryId` / `categorySlug`: Filter by category.
-    - `minPrice` / `maxPrice`: Price range in USD.
+    - `minPrice` / `maxPrice`: Price range filter in USD.
     - `availability`: `IN_STOCK`, `LOW_STOCK`, `OUT_OF_STOCK`, `PREORDER`, `DISCONTINUED`.
     - `sortBy`: `price_asc`, `price_desc`, `newest`, `popularity`.
     - `page` (default `1`), `limit` (default `20`).
 * **`GET /products/:idOrSlug`** (Public)
   - Returns full product details including gallery `images`, bullet `highlights`, technical `specifications`, `shippingNotes`, `rating`, and customer reviews.
 * **`POST /products`** (Admin)
-  - Create new product with gallery images, specifications, and highlights.
+  - Creates a new product with gallery images, specifications, and highlights.
 * **`PATCH /products/:id`** (Admin)
-  - Update product information, pricing, stock, or status (`ACTIVE`, `ARCHIVED`).
+  - Updates product information, pricing, inventory stock, or status (`ACTIVE`, `ARCHIVED`).
 * **`DELETE /products/:id`** (Admin)
-  - Delete or archive a product.
+  - Deletes or archives a product.
 
 ---
 
 ## 4. Shopping Cart
 
-*(Requires Customer Authentication: `@Roles('CUSTOMER')`)*
+*(Strictly Requires Authentication: `@Roles('CUSTOMER', 'ADMIN')`)*
 
 * **`GET /store/cart`** (Customer)
-  - Returns active cart with items, prices, quantities, subtotal, tax estimation, and final total.
+  - Returns active cart with items, unit prices, quantities, subtotal, tax estimation, and final total.
 * **`POST /store/cart/items`** (Customer)
-  - Add product to cart:
+  - Adds product to cart:
     ```json
     {
-      "productId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "productId": "uuid-here",
       "quantity": 1
     }
     ```
 * **`PATCH /store/cart/items/:itemId`** (Customer)
-  - Update item quantity (`{ "quantity": 3 }`). Setting `quantity: 0` removes the item.
+  - Updates item quantity (`{ "quantity": 3 }`). Setting `quantity: 0` removes the item.
 * **`DELETE /store/cart/items/:itemId`** (Customer)
-  - Remove an item from the cart.
+  - Removes an item from the cart.
 * **`DELETE /store/cart`** (Customer)
-  - Clear entire cart.
+  - Clears entire cart.
 * **`GET /store/cart/count`** (Customer)
-  - Returns badge item count for navbar cart icon.
+  - Returns badge item count for the navbar cart icon.
 
 ---
 
 ## 5. Delivery Addresses
 
+*(Strictly Requires Authentication: `@Roles('CUSTOMER', 'ADMIN')`)*
+
 * **`GET /store/addresses`** (Customer)
-  - List customer's saved delivery addresses.
+  - Lists customer's saved delivery addresses.
 * **`POST /store/addresses`** (Customer)
-  - Save a new address:
+  - Saves a new delivery address:
     ```json
     {
       "label": "Home",
@@ -117,81 +130,81 @@ This is the comprehensive API guide for the **Store, Products, Cart, Checkout, D
     }
     ```
 * **`PATCH /store/addresses/:id`** (Customer)
-  - Edit saved address.
+  - Edits saved address.
 * **`PATCH /store/addresses/:id/set-default`** (Customer)
-  - Set as default delivery address.
+  - Sets address as active default delivery address.
 * **`DELETE /store/addresses/:id`** (Customer)
-  - Delete saved address.
+  - Deletes saved address.
 
 ---
 
 ## 6. Orders & Checkout (Stripe & COD)
 
+*(Strictly Requires Authentication: `@Roles('CUSTOMER', 'ADMIN')`)*
+
 * **`POST /store/orders`** (Customer)
   - Places order from active cart. Generates `ORD-YYYYMMDD-XXXXX`.
-  - Supports `shippingAddressId` (or new delivery address payload) and payment method:
+  - Supports saved `shippingAddressId` or new address payload, with payment method:
     ```json
     {
       "shippingAddressId": "uuid-here",
       "paymentMethod": "STRIPE",
-      "customerNotes": "Please leave at front door"
+      "customerNotes": "Please leave on porch"
     }
     ```
-  - For `paymentMethod: "STRIPE"`, returns Stripe client secret and payment URL.
-* **`GET /store/orders/checkout/session/:orderId`** (Customer)
-  - Retrieve active checkout session details.
+  - For `paymentMethod: "STRIPE"`, returns Stripe client secret and checkout URL.
 * **`GET /store/orders`** (Customer)
-  - List customer's own orders.
+  - Lists customer's own order history.
 * **`GET /store/orders/:id`** (Customer / Admin)
   - Detailed order view with items, delivery address snapshot, tracking number, and status timeline.
 * **`GET /store/orders/admin/list`** (Admin)
-  - Admin list with KPI counters (`PENDING`, `PAID`, `PROCESSING`, `SHIPPED`, `DELIVERED`, `CANCELLED`).
+  - Admin management list with KPI counters (`PENDING`, `PAID`, `PROCESSING`, `SHIPPED`, `DELIVERED`, `CANCELLED`).
 * **`PATCH /store/orders/:id/status`** (Admin)
-  - Update order status, tracking number, and carrier (e.g. FedEx, UPS).
+  - Updates order status, carrier (FedEx, UPS), and tracking number.
 
 ---
 
-## 7. Store Invoices & Downloads
+## 7. Store Invoices & PDF Downloads
 
 * **`GET /store/invoices/orders/:orderId`** (Customer / Admin)
-  - Retrieve formal invoice breakdown for a product order (`INV-YYYYMMDD-XXXXX`).
-* **`GET /store/invoices/orders/:orderId/download`** (Customer / Admin)
-  - Download or view printable HTML/PDF invoice.
+  - Formal invoice breakdown for a store product order (`INV-YYYYMMDD-XXXXX`).
+* **`GET /store/invoices/orders/:orderId/pdf`** (Customer / Admin)
+  - Download or stream official PDF invoice.
 
 ---
 
 ## 8. Product Returns & Refunds
 
 * **`POST /store/returns/orders/:orderId`** (Customer)
-  - Request product return with reason and item selection.
+  - Submits product return request with reason and selected items.
 * **`GET /store/returns/orders/:orderId`** (Customer / Admin)
-  - Check status of return request (`PENDING`, `APPROVED`, `REJECTED`, `REFUNDED`).
+  - Checks status of return request (`PENDING`, `APPROVED`, `REJECTED`, `REFUNDED`).
 * **`PATCH /store/returns/orders/:orderId/refund`** (Admin)
-  - Process refund and update payment status.
+  - Approves refund and marks payment status.
 
 ---
 
 ## 9. Product Customer Reviews
 
 * **`POST /reviews`** (**Customer Only** - `@Roles('CUSTOMER')`)
-  - Submit 1–5 star review for a purchased product:
+  - Submits 1–5 star review for a purchased product:
     ```json
     {
       "type": "PRODUCT",
       "productId": "uuid-here",
       "rating": 5,
-      "title": "Outstanding suction and build quality!",
-      "body": "Easy to install and runs super quiet. Highly recommended."
+      "headline": "Outstanding suction and build quality!",
+      "comment": "Easy to install and runs super quiet. Highly recommended."
     }
     ```
 * **`GET /reviews?type=PRODUCT&productId=uuid-here`** (Public)
-  - Get published reviews with average rating and total counts.
+  - Retrieves published product reviews with average rating and star counts.
 
 ---
 
 ## 10. Store Analytics & Sales Reports
 
 * **`GET /reports/sales`** (Admin)
-  - Total sales revenue USD, Average Order Value (AOV), and top 5 bestselling products by revenue.
+  - Total sales revenue USD, Average Order Value (AOV), and top bestselling products by revenue.
 * **`GET /reports/overview`** (Admin)
-  - Product sales volume, product orders count, and 14-day timeseries revenue chart points.
+  - Product sales volume, orders count, and 14-day timeseries revenue chart points.
