@@ -395,17 +395,53 @@ export class ScheduleService {
       }
     }
 
-    const updated = await this.prisma.appointment.update({
-      where: { id: appointmentId },
-      data: {
-        startAt,
-        endAt,
-        technicianId: techId || null,
-        status: dto.status || 'RESCHEDULED',
-        adminNote: dto.adminNote !== undefined ? dto.adminNote?.trim() || null : appointment.adminNote,
-        notes: dto.notes !== undefined ? dto.notes?.trim() || null : appointment.notes,
-      },
-      include: this.appointmentInclude(),
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const app = await tx.appointment.update({
+        where: { id: appointmentId },
+        data: {
+          startAt,
+          endAt,
+          technicianId: techId || null,
+          status: dto.status || 'RESCHEDULED',
+          adminNote: dto.adminNote !== undefined ? dto.adminNote?.trim() || null : appointment.adminNote,
+          notes: dto.notes !== undefined ? dto.notes?.trim() || null : appointment.notes,
+        },
+        include: this.appointmentInclude(),
+      });
+
+      if (appointment.serviceRequestId) {
+        const targetDate = dto.date || appointment.startAt.toISOString().slice(0, 10);
+        const timeWindowLabel = dto.startTime && dto.endTime ? `${dto.startTime} - ${dto.endTime}` : undefined;
+
+        await tx.serviceRequest.update({
+          where: { id: appointment.serviceRequestId },
+          data: {
+            preferredDate: targetDate,
+            ...(timeWindowLabel ? { preferredTime: timeWindowLabel } : {}),
+            assignedTechnicianId: techId || undefined,
+            currentSchedule: {
+              date: targetDate,
+              startTime: dto.startTime || '09:00 AM',
+              endTime: dto.endTime || '11:00 AM',
+              appointmentId: appointment.id,
+              rescheduledAt: new Date().toISOString(),
+              technicianId: techId || null,
+            },
+          },
+        });
+      }
+
+      if (appointment.serviceOrderId) {
+        await tx.serviceOrder.update({
+          where: { id: appointment.serviceOrderId },
+          data: {
+            scheduledAt: startAt,
+            assignedTechnicianId: techId || undefined,
+          },
+        });
+      }
+
+      return app;
     });
 
     return {
@@ -455,15 +491,33 @@ export class ScheduleService {
       );
     }
 
-    const updated = await this.prisma.appointment.update({
-      where: { id: appointmentId },
-      data: {
-        technicianId: dto.technicianId,
-        adminNote: dto.adminNote
-          ? `${appointment.adminNote ? `${appointment.adminNote} | ` : ''}Assigned: ${dto.adminNote}`
-          : appointment.adminNote,
-      },
-      include: this.appointmentInclude(),
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const app = await tx.appointment.update({
+        where: { id: appointmentId },
+        data: {
+          technicianId: dto.technicianId,
+          adminNote: dto.adminNote
+            ? `${appointment.adminNote ? `${appointment.adminNote} | ` : ''}Assigned: ${dto.adminNote}`
+            : appointment.adminNote,
+        },
+        include: this.appointmentInclude(),
+      });
+
+      if (appointment.serviceRequestId) {
+        await tx.serviceRequest.update({
+          where: { id: appointment.serviceRequestId },
+          data: { assignedTechnicianId: dto.technicianId },
+        });
+      }
+
+      if (appointment.serviceOrderId) {
+        await tx.serviceOrder.update({
+          where: { id: appointment.serviceOrderId },
+          data: { assignedTechnicianId: dto.technicianId },
+        });
+      }
+
+      return app;
     });
 
     return {

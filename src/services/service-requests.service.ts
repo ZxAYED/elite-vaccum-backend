@@ -286,6 +286,35 @@ export class ServiceRequestsService {
   // INTAKE & CREATION
   // ==========================================
 
+  private parseDateTime(dateStr: string, timeStr: string): Date {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const cleaned = timeStr.trim().toUpperCase();
+    const match = cleaned.match(/(\d+):(\d+)\s*(AM|PM)/i);
+
+    let hours = 9;
+    let minutes = 0;
+
+    if (match) {
+      hours = Number(match[1]);
+      minutes = Number(match[2]);
+      const ampm = match[3];
+
+      if (ampm === 'PM' && hours < 12) hours += 12;
+      if (ampm === 'AM' && hours === 12) hours = 0;
+    }
+
+    return new Date(Date.UTC(year, month - 1, day, hours, minutes, 0));
+  }
+
+  private parseTimeWindow(dateStr: string, timeWindow: string): { startAt: Date; endAt: Date } {
+    const parts = timeWindow.split('-');
+    const startStr = (parts[0] || '09:00 AM').trim();
+    const endStr = (parts[1] || '11:00 AM').trim();
+    const startAt = this.parseDateTime(dateStr, startStr);
+    const endAt = this.parseDateTime(dateStr, endStr);
+    return { startAt, endAt };
+  }
+
   async createRequest(
     dto: CreateServiceRequestDto,
     files?: Array<Express.Multer.File>,
@@ -294,6 +323,30 @@ export class ServiceRequestsService {
     const customerId = await this.resolveOrCreateCustomer(dto, user);
     const service = await this.resolveService(dto.serviceSlug);
     const businessId = await this.generateRequestBusinessId();
+
+    // 1. Validate requested slot availability against active capacity
+    const { startAt, endAt } = this.parseTimeWindow(dto.preferredDate, dto.timeWindow);
+
+    const activeTechCount = await this.prisma.technician.count({
+      where: { status: 'ACTIVE' },
+    });
+    const maxCapacity = Math.max(1, activeTechCount);
+
+    const overlappingBookings = await this.prisma.appointment.count({
+      where: {
+        status: { notIn: ['CANCELLED'] },
+        OR: [
+          { startAt: { lt: endAt }, endAt: { gt: startAt } },
+          { startAt: startAt },
+        ],
+      },
+    });
+
+    if (overlappingBookings >= maxCapacity) {
+      throw new BadRequestException(
+        `The selected time window '${dto.timeWindow}' on ${dto.preferredDate} is already fully booked. Please choose another time slot.`,
+      );
+    }
 
     // Upload any multipart files to Cloudinary
     const uploadedAttachments =
@@ -383,6 +436,18 @@ export class ServiceRequestsService {
         });
       }
 
+      // 4. Immediately create Appointment record to lock and book the requested slot in the system
+      await tx.appointment.create({
+        data: {
+          serviceRequestId: request.id,
+          status: 'CONFIRMED',
+          startAt,
+          endAt,
+          addressSnapshot: serviceAddressSnapshot,
+          notes: `Customer booking: ${dto.timeWindow} on ${dto.preferredDate}`,
+        },
+      });
+
       const fullRecord = await tx.serviceRequest.findUnique({
         where: { id: request.id },
         include: this.requestInclude(),
@@ -390,7 +455,7 @@ export class ServiceRequestsService {
 
       return {
         success: true,
-        message: 'Service intake request submitted successfully',
+        message: 'Service intake request submitted successfully and time slot reserved',
         businessId: request.businessId,
         request: fullRecord,
       };
