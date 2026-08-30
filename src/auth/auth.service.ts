@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -11,6 +12,7 @@ import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import type { StringValue } from 'ms';
 import { EmailService } from 'src/email/email.service';
+import { RedisService } from 'src/redis';
 import { PrismaService } from '../prisma/prisma.service';
 
 type PublicUser = {
@@ -35,6 +37,7 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
+    private readonly redis: RedisService,
   ) {}
 
   private normalizeEmail(email: string) {
@@ -71,11 +74,11 @@ export class AuthService {
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
-      fullName: `${user.firstName} ${user.lastName}`.trim(),
+      fullName: `${user.firstName} ${user.lastName}`.trim() || user.email,
       role: user.role,
-      phone: user.phone,
+      phone: user.phone ?? null,
       isActive: user.isActive,
-      isEmailVerified: !!user.emailVerifiedAt,
+      isEmailVerified: Boolean(user.emailVerifiedAt),
       emailVerifiedAt: user.emailVerifiedAt,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
@@ -96,6 +99,18 @@ export class AuthService {
   }
 
   private async createAndSendOtp(email: string, purpose: OtpPurpose) {
+    // Rate limit OTP generation per email address via Redis atomic counter (max 4 per 5 minutes)
+    const rateLimitKey = `auth:otp_rate:${email}:${purpose}`;
+    const attempts = await this.redis.incr(rateLimitKey);
+    if (attempts === 1) {
+      await this.redis.expire(rateLimitKey, 300); // 5 minutes window
+    }
+    if (attempts > 4) {
+      throw new BadRequestException(
+        'Too many verification code requests. Please wait 5 minutes before trying again.',
+      );
+    }
+
     const otp = this.generateOtp();
     const expiresAt = this.getOtpExpiryDate();
 
@@ -173,6 +188,8 @@ export class AuthService {
       where: { id: record.id },
       data: { isConsumed: true, consumedAt: new Date() },
     });
+
+    await this.redis.del(`auth:otp_rate:${email}:${purpose}`);
   }
 
   private getRefreshSecret() {

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   InvoiceStatus,
   PaymentStatus,
@@ -7,12 +7,30 @@ import {
   ServiceOrderStatus,
   ServiceRequestStatus,
 } from '@prisma/client';
+import * as crypto from 'crypto';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { RedisService } from 'src/redis';
 import { ReportsQueryDto } from './dto/reports-query.dto';
 
 @Injectable()
 export class ReportsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(ReportsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
+
+  private getCacheKey(prefix: string, query?: any): string {
+    if (!query || Object.keys(query).length === 0) {
+      return `reports:${prefix}:all`;
+    }
+    const hash = crypto
+      .createHash('md5')
+      .update(JSON.stringify(query))
+      .digest('hex');
+    return `reports:${prefix}:${hash}`;
+  }
 
   private getDateRange(query: ReportsQueryDto) {
     const to = query.to ? new Date(query.to) : new Date();
@@ -31,6 +49,10 @@ export class ReportsService {
   // ==========================================
 
   async getOverview(query: ReportsQueryDto) {
+    const cacheKey = this.getCacheKey('overview', query);
+    const cached = await this.redis.get<any>(cacheKey);
+    if (cached) return cached;
+
     const { from, to } = this.getDateRange(query);
 
     const [
@@ -120,7 +142,7 @@ export class ReportsService {
       totalRevenue: Number(val.total.toFixed(2)),
     }));
 
-    return {
+    const result = {
       success: true,
       data: {
         metrics: {
@@ -146,6 +168,9 @@ export class ReportsService {
         },
       },
     };
+
+    await this.redis.set(cacheKey, result, 60);
+    return result;
   }
 
   // ==========================================
@@ -153,6 +178,10 @@ export class ReportsService {
   // ==========================================
 
   async getSales(query: ReportsQueryDto) {
+    const cacheKey = this.getCacheKey('sales', query);
+    const cached = await this.redis.get<any>(cacheKey);
+    if (cached) return cached;
+
     const orders = await this.prisma.productOrder.findMany({
       where: { status: { not: ProductOrderStatus.CANCELLED } },
       include: {
@@ -188,7 +217,7 @@ export class ReportsService {
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 5);
 
-    return {
+    const result = {
       success: true,
       data: {
         totalSalesUsd: Number(totalSalesUsd.toFixed(2)),
@@ -197,6 +226,9 @@ export class ReportsService {
         topProducts,
       },
     };
+
+    await this.redis.set(cacheKey, result, 60);
+    return result;
   }
 
   // ==========================================
@@ -204,6 +236,10 @@ export class ReportsService {
   // ==========================================
 
   async getServiceOperations(query: ReportsQueryDto) {
+    const cacheKey = this.getCacheKey('services', query);
+    const cached = await this.redis.get<any>(cacheKey);
+    if (cached) return cached;
+
     const requests = await this.prisma.serviceRequest.findMany({
       include: { service: { select: { name: true, category: true } } },
     });
@@ -218,13 +254,16 @@ export class ReportsService {
       .map(([serviceName, count]) => ({ serviceName, count }))
       .sort((a, b) => b.count - a.count);
 
-    return {
+    const result = {
       success: true,
       data: {
         totalRequests: requests.length,
         topServices,
       },
     };
+
+    await this.redis.set(cacheKey, result, 60);
+    return result;
   }
 
   // ==========================================
@@ -232,6 +271,10 @@ export class ReportsService {
   // ==========================================
 
   async getTechnicians() {
+    const cacheKey = 'reports:technicians:leaderboard';
+    const cached = await this.redis.get<any>(cacheKey);
+    if (cached) return cached;
+
     const technicians = await this.prisma.technician.findMany({
       include: {
         _count: {
@@ -255,10 +298,13 @@ export class ReportsService {
       serviceReportsCount: t._count.serviceReports,
     }));
 
-    return {
+    const result = {
       success: true,
       data: leaderboard,
     };
+
+    await this.redis.set(cacheKey, result, 60);
+    return result;
   }
 
   // ==========================================
@@ -266,6 +312,10 @@ export class ReportsService {
   // ==========================================
 
   async getCustomers() {
+    const cacheKey = 'reports:customers:growth';
+    const cached = await this.redis.get<any>(cacheKey);
+    if (cached) return cached;
+
     const totalCustomers = await this.prisma.customer.count();
     const customersWithOrders = await this.prisma.customer.count({
       where: {
@@ -276,7 +326,7 @@ export class ReportsService {
       },
     });
 
-    return {
+    const result = {
       success: true,
       data: {
         totalCustomers,
@@ -284,5 +334,8 @@ export class ReportsService {
         repeatRatePercentage: totalCustomers > 0 ? Number(((customersWithOrders / totalCustomers) * 100).toFixed(1)) : 0,
       },
     };
+
+    await this.redis.set(cacheKey, result, 60);
+    return result;
   }
 }

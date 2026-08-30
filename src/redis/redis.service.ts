@@ -101,6 +101,26 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Set key only if it does not already exist (atomic SET NX) with optional TTL in seconds.
+   * Returns true if key was set, false if it already existed.
+   */
+  async setNX<T>(key: string, value: T, ttlSeconds?: number): Promise<boolean> {
+    try {
+      const payload = typeof value === 'string' ? value : JSON.stringify(value);
+      let res: string | null;
+      if (ttlSeconds && ttlSeconds > 0) {
+        res = await this.client.set(key, payload, 'EX', ttlSeconds, 'NX');
+      } else {
+        res = await this.client.set(key, payload, 'NX');
+      }
+      return res === 'OK';
+    } catch (err: any) {
+      this.logger.error(`Redis setNX failed for key '${key}': ${err.message}`);
+      return false;
+    }
+  }
+
+  /**
    * Delete one or more keys.
    */
   async del(...keys: string[]): Promise<number> {

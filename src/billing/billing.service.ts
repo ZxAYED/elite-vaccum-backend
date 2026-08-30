@@ -15,6 +15,7 @@ import { RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { generateBusinessId } from 'src/common/utils/business-id.util';
 import { getPagination } from 'src/common/utils/pagination';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { RedisService } from 'src/redis';
 import Stripe from 'stripe';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import {
@@ -29,7 +30,10 @@ export class BillingService {
   private readonly logger = new Logger(BillingService.name);
   private stripe: Stripe | null = null;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {
     const stripeKey = process.env.STRIPE_SECRET_KEY;
     if (stripeKey && stripeKey.trim().length > 0 && !stripeKey.includes('...')) {
       this.stripe = new Stripe(stripeKey);
@@ -340,85 +344,118 @@ export class BillingService {
   // ==========================================
 
   async recordPayment(id: string, dto: RecordPaymentDto, user: RequestUser) {
-    const invoice = await this.prisma.invoice.findUnique({
-      where: { id },
-      include: { payments: true },
+    const lockKey = `payment:invoice:${id}`;
+    const lockToken = await this.redis.acquireLock(lockKey, {
+      ttlMs: 15000,
+      retryCount: 1,
+      retryDelayMs: 300,
     });
 
-    if (!invoice) throw new NotFoundException('Invoice not found');
+    if (!lockToken) {
+      throw new BadRequestException(
+        'A payment transaction is currently being processed for this invoice. Please wait a moment.',
+      );
+    }
 
-    return this.prisma.$transaction(async (tx) => {
-      const payment = await tx.payment.create({
-        data: {
-          invoiceId: id,
-          customerId: invoice.customerId,
-          amountUsd: new Prisma.Decimal(dto.amountUsd),
-          methodLabel: dto.methodLabel.trim(),
-          transactionReference: dto.transactionReference?.trim() || null,
-          status: dto.status || PaymentStatus.SUCCEEDED,
-        },
+    try {
+      const invoice = await this.prisma.invoice.findUnique({
+        where: { id },
+        include: { payments: true },
       });
 
-      // Calculate total paid across all payments
-      const existingPaid = invoice.payments
-        .filter((p) => p.status === PaymentStatus.SUCCEEDED)
-        .reduce((sum, p) => sum + Number(p.amountUsd), 0);
+      if (!invoice) throw new NotFoundException('Invoice not found');
 
-      const totalPaid = existingPaid + dto.amountUsd;
-      const invoiceTotal = Number(invoice.totalUsd);
+      return await this.prisma.$transaction(async (tx) => {
+        const payment = await tx.payment.create({
+          data: {
+            invoiceId: id,
+            customerId: invoice.customerId,
+            amountUsd: new Prisma.Decimal(dto.amountUsd),
+            methodLabel: dto.methodLabel.trim(),
+            transactionReference: dto.transactionReference?.trim() || null,
+            status: dto.status || PaymentStatus.SUCCEEDED,
+          },
+        });
 
-      const newStatus =
-        totalPaid >= invoiceTotal ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID;
+        // Calculate total paid across all payments
+        const existingPaid = invoice.payments
+          .filter((p) => p.status === PaymentStatus.SUCCEEDED)
+          .reduce((sum, p) => sum + Number(p.amountUsd), 0);
 
-      const updatedInvoice = await tx.invoice.update({
+        const totalPaid = existingPaid + dto.amountUsd;
+        const invoiceTotal = Number(invoice.totalUsd);
+
+        const newStatus =
+          totalPaid >= invoiceTotal ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID;
+
+        const updatedInvoice = await tx.invoice.update({
+          where: { id },
+          data: {
+            status: newStatus,
+            paidAt: newStatus === InvoiceStatus.PAID ? new Date() : invoice.paidAt,
+          },
+          include: this.invoiceInclude(),
+        });
+
+        return {
+          success: true,
+          message: `Payment of $${dto.amountUsd.toFixed(2)} recorded. Invoice marked ${newStatus}`,
+          payment,
+          invoice: updatedInvoice,
+        };
+      });
+    } finally {
+      await this.redis.releaseLock(lockKey, lockToken);
+    }
+  }
+
+  async recordRefund(id: string, dto: RecordRefundDto, user: RequestUser) {
+    const lockKey = `refund:invoice:${id}`;
+    const lockToken = await this.redis.acquireLock(lockKey, {
+      ttlMs: 15000,
+      retryCount: 0,
+    });
+
+    if (!lockToken) {
+      throw new BadRequestException(
+        'A refund operation is currently being processed for this invoice.',
+      );
+    }
+
+    try {
+      const invoice = await this.prisma.invoice.findUnique({
         where: { id },
+        include: { payments: true },
+      });
+
+      if (!invoice) throw new NotFoundException('Invoice not found');
+
+      const payment = await this.prisma.payment.findUnique({
+        where: { id: dto.paymentId },
+      });
+
+      if (!payment || payment.invoiceId !== id) {
+        throw new NotFoundException('Payment record not found for this invoice');
+      }
+
+      const refund = await this.prisma.refund.create({
         data: {
-          status: newStatus,
-          paidAt: newStatus === InvoiceStatus.PAID ? new Date() : invoice.paidAt,
+          invoiceId: id,
+          paymentId: dto.paymentId,
+          amountUsd: new Prisma.Decimal(dto.amountUsd),
+          status: 'COMPLETED',
+          reason: dto.reason.trim(),
         },
-        include: this.invoiceInclude(),
       });
 
       return {
         success: true,
-        message: `Payment of $${dto.amountUsd.toFixed(2)} recorded. Invoice marked ${newStatus}`,
-        payment,
-        invoice: updatedInvoice,
+        message: `Refund of $${dto.amountUsd.toFixed(2)} processed`,
+        refund,
       };
-    });
-  }
-
-  async recordRefund(id: string, dto: RecordRefundDto, user: RequestUser) {
-    const invoice = await this.prisma.invoice.findUnique({
-      where: { id },
-      include: { payments: true },
-    });
-
-    if (!invoice) throw new NotFoundException('Invoice not found');
-
-    const payment = await this.prisma.payment.findUnique({
-      where: { id: dto.paymentId },
-    });
-
-    if (!payment || payment.invoiceId !== id) {
-      throw new NotFoundException('Payment record not found for this invoice');
+    } finally {
+      await this.redis.releaseLock(lockKey, lockToken);
     }
-
-    const refund = await this.prisma.refund.create({
-      data: {
-        invoiceId: id,
-        paymentId: dto.paymentId,
-        amountUsd: new Prisma.Decimal(dto.amountUsd),
-        status: 'COMPLETED',
-        reason: dto.reason.trim(),
-      },
-    });
-
-    return {
-      success: true,
-      message: `Refund of $${dto.amountUsd.toFixed(2)} processed`,
-      refund,
-    };
   }
 
   async generateHtmlInvoice(id: string, user?: RequestUser | null) {
