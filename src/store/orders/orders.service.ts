@@ -641,21 +641,44 @@ export class StoreOrdersService {
   /**
    * Handles Stripe webhook events (checkout.session.completed, payment_intent.succeeded).
    */
-  async handleStripeWebhook(payload: Buffer | string, signature?: string) {
+  async handleStripeWebhook(payload: Buffer | string | any, signature?: string) {
     let event: Stripe.Event;
 
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
-    if (this.stripe && webhookSecret && signature) {
+    if (this.stripe && webhookSecret) {
+      if (!signature) {
+        throw new BadRequestException('Missing stripe-signature header');
+      }
       try {
-        event = this.stripe.webhooks.constructEvent(payload, signature, webhookSecret);
+        const rawBuffer = Buffer.isBuffer(payload)
+          ? payload
+          : typeof payload === 'string'
+            ? Buffer.from(payload, 'utf8')
+            : Buffer.from(JSON.stringify(payload), 'utf8');
+
+        event = this.stripe.webhooks.constructEvent(
+          rawBuffer,
+          signature,
+          webhookSecret,
+        );
       } catch (err: any) {
         throw new BadRequestException(
           `Stripe Webhook Signature verification failed: ${err.message}`,
         );
       }
     } else {
-      event = typeof payload === 'string' ? JSON.parse(payload) : JSON.parse(payload.toString());
+      if (process.env.NODE_ENV === 'production') {
+        throw new BadRequestException(
+          'Stripe webhook signature verification is strictly required in production environment.',
+        );
+      }
+      event =
+        typeof payload === 'string'
+          ? JSON.parse(payload)
+          : Buffer.isBuffer(payload)
+            ? JSON.parse(payload.toString('utf8'))
+            : payload;
     }
 
     // Idempotency: Protect against duplicate delivery of the same Stripe event ID

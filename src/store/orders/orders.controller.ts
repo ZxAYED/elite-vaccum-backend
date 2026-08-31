@@ -9,6 +9,7 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -78,10 +79,12 @@ export class StoreOrdersController {
       'Stripe Webhook handler for checkout.session.completed & payment confirmation',
   })
   handleStripeWebhook(
+    @Req() req: any,
     @Body() payload: any,
     @Headers('stripe-signature') signature?: string,
   ) {
-    return this.ordersService.handleStripeWebhook(payload, signature);
+    const rawPayload = req?.rawBody || payload;
+    return this.ordersService.handleStripeWebhook(rawPayload, signature);
   }
 
   @Get()

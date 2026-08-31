@@ -366,7 +366,7 @@ export class BillingService {
   // ==========================================
 
   async recordPayment(id: string, dto: RecordPaymentDto, user: RequestUser) {
-    const lockKey = `payment:invoice:${id}`;
+    const lockKey = `billing:invoice:${id}`;
     const lockToken = await this.redis.acquireLock(lockKey, {
       ttlMs: 15000,
       retryCount: 1,
@@ -375,14 +375,14 @@ export class BillingService {
 
     if (!lockToken) {
       throw new BadRequestException(
-        'A payment transaction is currently being processed for this invoice. Please wait a moment.',
+        'A payment or billing transaction is currently being processed for this invoice. Please wait a moment.',
       );
     }
 
     try {
       const invoice = await this.prisma.invoice.findUnique({
         where: { id },
-        include: { payments: true },
+        include: { payments: true, refunds: true },
       });
 
       if (!invoice) throw new NotFoundException('Invoice not found');
@@ -399,16 +399,21 @@ export class BillingService {
           },
         });
 
-        // Calculate total paid across all payments
+        // Calculate net paid across all payments minus refunds
         const existingPaid = invoice.payments
           .filter((p) => p.status === PaymentStatus.SUCCEEDED)
           .reduce((sum, p) => sum + Number(p.amountUsd), 0);
 
+        const existingRefunded = invoice.refunds
+          .filter((r) => r.status === 'COMPLETED')
+          .reduce((sum, r) => sum + Number(r.amountUsd), 0);
+
         const totalPaid = existingPaid + dto.amountUsd;
+        const netPaid = Math.max(0, totalPaid - existingRefunded);
         const invoiceTotal = Number(invoice.totalUsd);
 
         const newStatus =
-          totalPaid >= invoiceTotal ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID;
+          netPaid >= invoiceTotal ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID;
 
         const updatedInvoice = await tx.invoice.update({
           where: { id },
@@ -451,7 +456,7 @@ export class BillingService {
   }
 
   async recordRefund(id: string, dto: RecordRefundDto, user: RequestUser) {
-    const lockKey = `refund:invoice:${id}`;
+    const lockKey = `billing:invoice:${id}`;
     const lockToken = await this.redis.acquireLock(lockKey, {
       ttlMs: 15000,
       retryCount: 0,
@@ -459,14 +464,14 @@ export class BillingService {
 
     if (!lockToken) {
       throw new BadRequestException(
-        'A refund operation is currently being processed for this invoice.',
+        'A billing or refund operation is currently being processed for this invoice.',
       );
     }
 
     try {
       const invoice = await this.prisma.invoice.findUnique({
         where: { id },
-        include: { payments: true },
+        include: { payments: true, refunds: true },
       });
 
       if (!invoice) throw new NotFoundException('Invoice not found');
@@ -479,21 +484,54 @@ export class BillingService {
         throw new NotFoundException('Payment record not found for this invoice');
       }
 
-      const refund = await this.prisma.refund.create({
-        data: {
-          invoiceId: id,
-          paymentId: dto.paymentId,
-          amountUsd: new Prisma.Decimal(dto.amountUsd),
-          status: 'COMPLETED',
-          reason: dto.reason.trim(),
-        },
-      });
+      return await this.prisma.$transaction(async (tx) => {
+        const refund = await tx.refund.create({
+          data: {
+            invoiceId: id,
+            paymentId: dto.paymentId,
+            amountUsd: new Prisma.Decimal(dto.amountUsd),
+            status: 'COMPLETED',
+            reason: dto.reason.trim(),
+          },
+        });
 
-      return {
-        success: true,
-        message: `Refund of $${dto.amountUsd.toFixed(2)} processed`,
-        refund,
-      };
+        const totalPaid = invoice.payments
+          .filter((p) => p.status === PaymentStatus.SUCCEEDED)
+          .reduce((sum, p) => sum + Number(p.amountUsd), 0);
+
+        const totalRefunded =
+          invoice.refunds
+            .filter((r) => r.status === 'COMPLETED')
+            .reduce((sum, r) => sum + Number(r.amountUsd), 0) + dto.amountUsd;
+
+        const netPaid = Math.max(0, totalPaid - totalRefunded);
+        const invoiceTotal = Number(invoice.totalUsd);
+
+        let newStatus: InvoiceStatus;
+        if (netPaid <= 0) {
+          newStatus = InvoiceStatus.ISSUED;
+        } else if (netPaid < invoiceTotal) {
+          newStatus = InvoiceStatus.PARTIALLY_PAID;
+        } else {
+          newStatus = InvoiceStatus.PAID;
+        }
+
+        const updatedInvoice = await tx.invoice.update({
+          where: { id },
+          data: {
+            status: newStatus,
+            paidAt: newStatus === InvoiceStatus.PAID ? invoice.paidAt : null,
+          },
+          include: this.invoiceInclude(),
+        });
+
+        return {
+          success: true,
+          message: `Refund of $${dto.amountUsd.toFixed(2)} processed. Invoice status updated to ${newStatus}.`,
+          refund,
+          invoice: updatedInvoice,
+        };
+      });
     } finally {
       await this.redis.releaseLock(lockKey, lockToken);
     }
@@ -610,8 +648,13 @@ export class BillingService {
       .filter((p) => p.status === PaymentStatus.SUCCEEDED)
       .reduce((sum, p) => sum + Number(p.amountUsd), 0);
 
+    const existingRefunded = invoice.refunds
+      .filter((r) => r.status === 'COMPLETED')
+      .reduce((sum, r) => sum + Number(r.amountUsd), 0);
+
     const totalUsd = Number(invoice.totalUsd);
-    const remainingBalance = Math.max(0, totalUsd - existingPaid);
+    const netPaid = Math.max(0, existingPaid - existingRefunded);
+    const remainingBalance = Math.max(0, totalUsd - netPaid);
 
     if (remainingBalance <= 0) {
       throw new BadRequestException('Invoice has no outstanding balance');
@@ -645,6 +688,12 @@ export class BillingService {
     }
 
     // Mock fallback when Stripe key is not provided in local dev
+    if (process.env.NODE_ENV === 'production') {
+      throw new BadRequestException(
+        'Online payment processing is not configured for production.',
+      );
+    }
+
     return {
       success: true,
       mockMode: true,
@@ -667,13 +716,30 @@ export class BillingService {
     let amountPaid = Number(invoice.totalUsd);
     let transactionReference = paymentIntentId;
 
-    if (this.stripe && !paymentIntentId.startsWith('pi_mock_')) {
+    if (this.stripe) {
+      if (paymentIntentId.startsWith('pi_mock_')) {
+        throw new BadRequestException(
+          'Mock payment confirmation is not allowed when Stripe is configured.',
+        );
+      }
+
       const intent = await this.stripe.paymentIntents.retrieve(paymentIntentId);
       if (intent.status !== 'succeeded') {
-        throw new BadRequestException(`Stripe PaymentIntent is in '${intent.status}' state, not succeeded`);
+        throw new BadRequestException(
+          `Stripe PaymentIntent is in '${intent.status}' state, not succeeded`,
+        );
       }
       amountPaid = intent.amount_received / 100;
       transactionReference = intent.id;
+    } else {
+      if (process.env.NODE_ENV === 'production') {
+        throw new BadRequestException(
+          'Online payment processing is not configured for production.',
+        );
+      }
+      if (!paymentIntentId.startsWith('pi_mock_')) {
+        throw new BadRequestException('Invalid mock payment intent ID.');
+      }
     }
 
     return this.recordPayment(

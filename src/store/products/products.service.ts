@@ -874,36 +874,52 @@ export class StoreProductsService {
     tx?: Prisma.TransactionClient,
   ) {
     const client = tx || this.prisma;
-    const product = await client.product.findUnique({
-      where: { id: productId },
-      select: { id: true, name: true, sku: true, quantity: true, availability: true },
+
+    // 1. Atomic decrement with conditional check (prevents overselling under high concurrency)
+    const updateResult = await client.product.updateMany({
+      where: {
+        id: productId,
+        quantity: { gte: quantity },
+      },
+      data: {
+        quantity: { decrement: quantity },
+      },
     });
 
-    if (!product) {
-      throw new NotFoundException('Product not found');
-    }
-
-    if (product.quantity < quantity) {
+    if (updateResult.count === 0) {
+      const product = await client.product.findUnique({
+        where: { id: productId },
+        select: { name: true, quantity: true },
+      });
+      if (!product) {
+        throw new NotFoundException('Product not found');
+      }
       throw new BadRequestException(
         `Insufficient stock for product '${product.name}'. Available: ${product.quantity}, requested: ${quantity}`,
       );
     }
 
-    const newQuantity = product.quantity - quantity;
-    const newAvailability = this.calculateStockAvailability(
-      newQuantity,
-      product.availability,
-    );
-
-    const updated = await client.product.update({
+    // 2. Fetch updated product and adjust availability flag
+    const updated = await client.product.findUnique({
       where: { id: productId },
-      data: {
-        quantity: newQuantity,
-        availability: newAvailability,
-      },
     });
 
-    await this.invalidateProductCache(productId, product.sku);
+    if (updated) {
+      const newAvailability = this.calculateStockAvailability(
+        updated.quantity,
+        updated.availability,
+      );
+
+      if (newAvailability !== updated.availability) {
+        await client.product.update({
+          where: { id: productId },
+          data: { availability: newAvailability },
+        });
+      }
+
+      await this.invalidateProductCache(productId, updated.sku);
+    }
+
     return updated;
   }
 

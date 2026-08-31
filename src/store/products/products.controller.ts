@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -39,6 +40,36 @@ import { UpdateProductStatusDto } from '../dto/update-product-status.dto';
 import { UpdateProductStockDto } from '../dto/update-product-stock.dto';
 import { StoreProductsService } from './products.service';
 
+const productImageMulterOptions = {
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB max per file
+    files: 10,
+  },
+  fileFilter: (
+    _req: any,
+    file: Express.Multer.File,
+    callback: (error: Error | null, acceptFile: boolean) => void,
+  ) => {
+    const allowedMimes = [
+      'image/jpeg',
+      'image/jpg',
+      'image/png',
+      'image/webp',
+      'image/gif',
+    ];
+    if (allowedMimes.includes(file.mimetype)) {
+      callback(null, true);
+    } else {
+      callback(
+        new BadRequestException(
+          `Invalid file type '${file.mimetype}'. Only JPG, PNG, WEBP, and GIF images are allowed.`,
+        ),
+        false,
+      );
+    }
+  },
+};
+
 @ApiTags('Store - Products')
 @ApiBearerAuth('bearer')
 @UseGuards(AuthGuard)
@@ -49,7 +80,7 @@ export class StoreProductsController {
   @Post()
   @Roles('ADMIN')
   @HttpCode(HttpStatus.CREATED)
-  @UseInterceptors(FilesInterceptor('images', 10))
+  @UseInterceptors(FilesInterceptor('images', 10, productImageMulterOptions))
   @ApiConsumes('multipart/form-data', 'application/json')
   @ApiOperation({
     summary:
@@ -150,7 +181,7 @@ export class StoreProductsController {
 
   @Patch(':id')
   @Roles('ADMIN')
-  @UseInterceptors(FilesInterceptor('images', 10))
+  @UseInterceptors(FilesInterceptor('images', 10, productImageMulterOptions))
   @ApiConsumes('multipart/form-data', 'application/json')
   @ApiOperation({
     summary:

@@ -123,7 +123,7 @@ export class AuthGuard implements CanActivate {
         error instanceof Prisma.PrismaClientValidationError
       ) {
         throw new ServiceUnavailableException(
-          error.message || error.name || 'Database unavailable',
+          'Authentication service is temporarily unavailable. Please try again shortly.',
         );
       }
       throw error;
