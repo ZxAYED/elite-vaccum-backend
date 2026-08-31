@@ -939,36 +939,117 @@ A complete enterprise chat system built with **Socket.io (`/chat` namespace)**, 
 
 ### 16.1 WebSocket Gateway Architecture (`/chat`)
 
-- **Connection URL**: `ws://localhost:4000/chat` (or `wss://api.yourdomain.com/chat`)
-- **Authentication**: Pass Bearer token via `auth.token` or `extraHeaders.authorization`:
+- **Connection URL**: `ws://localhost:5000/chat` (or `wss://api.yourdomain.com/chat`)
+- **Authentication**: Pass Bearer token via `auth.token`, query parameter `?token=...`, or headers:
 ```typescript
-import { io } from 'socket.io-client';
+import { io, Socket } from 'socket.io-client';
 
-const chatSocket = io('http://localhost:4000/chat', {
-  auth: {
-    token: localStorage.getItem('accessToken'),
-  },
-  transports: ['websocket'],
-});
+export const initChatSocket = (token: string): Socket => {
+  const socket = io('http://localhost:5000/chat', {
+    auth: { token },
+    transports: ['websocket'],
+    reconnection: true,
+    reconnectionAttempts: 5,
+    reconnectionDelay: 1000,
+  });
 
-chatSocket.on('connect', () => {
-  console.log('Connected to Live Support Chat Gateway');
-});
+  socket.on('connect', () => {
+    console.log('✅ Connected to Live Support Chat Gateway with ID:', socket.id);
+  });
+
+  socket.on('chat:connected', ({ userId, connectedRooms }) => {
+    console.log('Authenticated as user:', userId, 'Joined rooms:', connectedRooms);
+  });
+
+  socket.on('error', (err) => {
+    console.error('Socket error:', err.message);
+  });
+
+  return socket;
+};
 ```
 
-### 16.2 Real-Time WebSocket Events Table
+### 16.2 Real-Time WebSocket Events Matrix
 
-| Event Name | Direction | Payload Schema | Purpose |
+| Event Name | Direction | Payload Schema | Response / Purpose |
 | :--- | :--- | :--- | :--- |
-| `chat:join_conversation` | Client ➔ Server | `{ "conversationId": "conv-uuid" }` | Subscribe socket to specific chat room |
-| `chat:send_message` | Client ➔ Server | `{ "conversationId": "conv-uuid", "content": "Hello!" }` | Send message in real-time |
-| `chat:typing` | Client ➔ Server | `{ "conversationId": "conv-uuid", "isTyping": true }` | Send live typing indicator |
-| `chat:mark_read` | Client ➔ Server | `{ "conversationId": "conv-uuid" }` | Mark all room messages read |
-| `chat:message_received` | Server ➔ Client | `{ "conversationId": "...", "message": { ... } }` | Instant real-time message received (<10ms) |
-| `chat:typing_update` | Server ➔ Client | `{ "conversationId": "...", "userId": "...", "isTyping": true }` | Show/hide "... is typing" banner |
-| `chat:read_receipt_update` | Server ➔ Client | `{ "conversationId": "...", "userId": "...", "readAt": "..." }` | Update double-check checkmarks |
+| `chat:join_conversation` | Client ➔ Server | `{ "conversationId": "uuid" }` | `{ success: true, room: "..." }` |
+| `chat:send_message` | Client ➔ Server | `{ "conversationId": "uuid", "content": "Hello", "type": "TEXT" }` | ACK callback `{ success: true, message: {...} }` |
+| `chat:typing` | Client ➔ Server | `{ "conversationId": "uuid", "isTyping": true }` | Broadcasts typing state to room participants |
+| `chat:mark_read` | Client ➔ Server | `{ "conversationId": "uuid" }` | Updates read timestamp & broadcasts receipt |
+| `chat:message_received` | Server ➔ Client | `{ "conversationId": "uuid", "message": { ... } }` | Instant real-time message (<10ms via Redis) |
+| `chat:typing_update` | Server ➔ Client | `{ "conversationId": "uuid", "userId": "uuid", "userName": "email", "isTyping": boolean }` | Renders typing animation banner |
+| `chat:read_receipt_update` | Server ➔ Client | `{ "conversationId": "uuid", "userId": "uuid", "readAt": "ISO_DATE" }` | Updates message checkmarks to "Read" |
 
-### 16.3 REST Endpoints (Conversations & Fallbacks)
+### 16.3 Frontend Event Listeners & Emitters Code Examples
+
+```typescript
+// 1. Send Message via Socket with Immediate Acknowledgment Callback
+export const sendChatMessage = (
+  socket: Socket,
+  conversationId: string,
+  content: string,
+  onSent?: (res: { success: boolean; message?: any; error?: string }) => void,
+) => {
+  socket.emit(
+    'chat:send_message',
+    { conversationId, content, type: 'TEXT' },
+    (ackResponse: { success: boolean; message?: any; error?: string }) => {
+      if (ackResponse.success) {
+        console.log('Message delivered:', ackResponse.message);
+      } else {
+        console.error('Failed to deliver message:', ackResponse.error);
+      }
+      onSent?.(ackResponse);
+    },
+  );
+};
+
+// 2. Typing Indicator Emitters
+export const emitTypingStatus = (socket: Socket, conversationId: string, isTyping: boolean) => {
+  socket.emit('chat:typing', { conversationId, isTyping });
+};
+
+// 3. Mark Conversation Read
+export const markChatRead = (socket: Socket, conversationId: string) => {
+  socket.emit('chat:mark_read', { conversationId });
+};
+
+// 4. Subscribe to Real-Time Updates in your React / Vue / Angular component
+export const setupChatListeners = (
+  socket: Socket,
+  activeConversationId: string,
+  currentUserId: string,
+  handlers: {
+    onMessage: (message: any) => void;
+    onTyping: (isTyping: boolean) => void;
+    onReadReceipt: (readAt: string) => void;
+  },
+) => {
+  // Listen for incoming messages
+  socket.on('chat:message_received', ({ conversationId, message }) => {
+    if (conversationId === activeConversationId) {
+      handlers.onMessage(message);
+    }
+  });
+
+  // Listen for typing updates
+  socket.on('chat:typing_update', ({ conversationId, userId, isTyping }) => {
+    if (conversationId === activeConversationId && userId !== currentUserId) {
+      handlers.onTyping(isTyping);
+    }
+  });
+
+  // Listen for read receipts
+  socket.on('chat:read_receipt_update', ({ conversationId, userId, readAt }) => {
+    if (conversationId === activeConversationId && userId !== currentUserId) {
+      handlers.onReadReceipt(readAt);
+    }
+  });
+};
+```
+
+### 16.4 REST Endpoints (Conversations & Multipart Fallback)
 
 #### 1. Start / Get Support Conversation
 - **Endpoint**: `POST /chat/conversations`
