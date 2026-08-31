@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import {
   InvoiceStatus,
+  NotificationType,
   Prisma,
   ServiceOrderStatus,
   UserRole,
@@ -14,6 +15,7 @@ import {
 import { RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { generateBusinessId } from 'src/common/utils/business-id.util';
 import { getPagination } from 'src/common/utils/pagination';
+import { NotificationsService } from 'src/notifications/notifications.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateServiceOrderDto } from './dto/create-service-order.dto';
 import {
@@ -28,7 +30,10 @@ import {
 export class ServiceOrdersService {
   private readonly logger = new Logger(ServiceOrdersService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   private isAdmin(user?: RequestUser | null) {
     return user?.role === UserRole.ADMIN;
@@ -68,6 +73,7 @@ export class ServiceOrdersService {
       technician: {
         select: {
           id: true,
+          userId: true,
           displayName: true,
           phone: true,
           rating: true,
@@ -164,6 +170,51 @@ export class ServiceOrdersService {
       });
 
       this.logger.log(`Service Order '${serviceOrder.businessId}' created by Admin (${user.email})`);
+
+      // Notify Customer
+      if (serviceOrder.customer?.userId) {
+        this.notificationsService
+          .create({
+            userId: serviceOrder.customer.userId,
+            type: NotificationType.SCHEDULE_DISPATCH,
+            title: `Service Order ${serviceOrder.businessId} Scheduled`,
+            message: `Your service visit is confirmed for ${new Date(serviceOrder.scheduledAt).toLocaleDateString()} at ${new Date(serviceOrder.scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`,
+            ctaLabel: 'View Service Order',
+            ctaUrl: `/services/orders/${serviceOrder.id}`,
+            metadata: {
+              serviceOrderId: serviceOrder.id,
+              businessId: serviceOrder.businessId,
+              scheduledAt: serviceOrder.scheduledAt,
+            },
+            sendEmail: true,
+            priority: 1,
+          })
+          .catch((err) => {
+            this.logger.warn(`Failed to notify customer of scheduled order: ${err.message}`);
+          });
+      }
+
+      // Notify Assigned Technician if set
+      if (serviceOrder.technician?.userId) {
+        this.notificationsService
+          .create({
+            userId: serviceOrder.technician.userId,
+            type: NotificationType.SCHEDULE_DISPATCH,
+            title: `New Service Job Assigned: ${serviceOrder.businessId}`,
+            message: `You have been assigned to ${serviceOrder.summary} scheduled for ${new Date(serviceOrder.scheduledAt).toLocaleString()}.`,
+            ctaLabel: 'Open Job',
+            ctaUrl: `/technician/orders/${serviceOrder.id}`,
+            metadata: {
+              serviceOrderId: serviceOrder.id,
+              businessId: serviceOrder.businessId,
+            },
+            sendEmail: true,
+            priority: 1,
+          })
+          .catch((err) => {
+            this.logger.warn(`Failed to notify technician of assignment: ${err.message}`);
+          });
+      }
 
       return {
         success: true,
@@ -365,6 +416,63 @@ export class ServiceOrdersService {
         });
       }
 
+      // Real-Time Notification on Status Change
+      if (updated.customer?.userId) {
+        let statusTitle = `Service Order ${updated.businessId} Update`;
+        let statusMsg = `Your service order status is now ${dto.status.replace(/_/g, ' ')}.`;
+        let priority = 2;
+
+        if (dto.status === ServiceOrderStatus.ON_THE_WAY) {
+          statusTitle = `Technician En Route! (${updated.businessId})`;
+          statusMsg = `Technician ${updated.technician?.displayName || 'Our technician'} is on the way to your property.`;
+          priority = 1;
+        } else if (dto.status === ServiceOrderStatus.ARRIVED) {
+          statusTitle = `Technician Arrived (${updated.businessId})`;
+          statusMsg = `Technician ${updated.technician?.displayName || 'Our technician'} has arrived on-site.`;
+          priority = 1;
+        } else if (dto.status === ServiceOrderStatus.COMPLETED) {
+          statusTitle = `Service Completed (${updated.businessId})`;
+          statusMsg = `Your central vacuum service has been completed! View your inspection summary and rate your service.`;
+          priority = 1;
+        }
+
+        this.notificationsService
+          .create({
+            userId: updated.customer.userId,
+            type: NotificationType.SCHEDULE_DISPATCH,
+            title: statusTitle,
+            message: statusMsg,
+            ctaLabel: 'View Order',
+            ctaUrl: `/services/orders/${updated.id}`,
+            metadata: {
+              serviceOrderId: updated.id,
+              status: dto.status,
+            },
+            sendEmail: dto.status === ServiceOrderStatus.COMPLETED,
+            priority,
+          })
+          .catch((err) => {
+            this.logger.warn(`Failed to notify customer of order status: ${err.message}`);
+          });
+      }
+
+      // Notify Admins on completion
+      if (dto.status === ServiceOrderStatus.COMPLETED) {
+        this.notificationsService
+          .notifyAdmins({
+            type: NotificationType.SCHEDULE_DISPATCH,
+            title: `Service Order Completed: ${updated.businessId}`,
+            message: `Service Order ${updated.businessId} was marked COMPLETED by ${user.role} (${user.email}).`,
+            ctaLabel: 'View Order',
+            ctaUrl: `/admin/service-orders/${updated.id}`,
+            metadata: { serviceOrderId: updated.id, status: dto.status },
+            priority: 2,
+          })
+          .catch((err) => {
+            this.logger.warn(`Failed to notify admins of completed service: ${err.message}`);
+          });
+      }
+
       return {
         success: true,
         message: `Service order status updated to ${dto.status}`,
@@ -403,6 +511,43 @@ export class ServiceOrdersService {
           actorLabel: `Admin (${user.email})`,
         },
       });
+
+      // Notify Assigned Technician
+      if (tech.userId) {
+        this.notificationsService
+          .create({
+            userId: tech.userId,
+            type: NotificationType.SCHEDULE_DISPATCH,
+            title: `New Job Assignment: ${order.businessId}`,
+            message: `You have been assigned to Service Order ${order.businessId} (${order.summary}).`,
+            ctaLabel: 'View Job',
+            ctaUrl: `/technician/orders/${order.id}`,
+            metadata: { serviceOrderId: order.id, businessId: order.businessId },
+            sendEmail: true,
+            priority: 1,
+          })
+          .catch((err) => {
+            this.logger.warn(`Failed to notify technician of assignment: ${err.message}`);
+          });
+      }
+
+      // Notify Customer
+      if (updated.customer?.userId) {
+        this.notificationsService
+          .create({
+            userId: updated.customer.userId,
+            type: NotificationType.SCHEDULE_DISPATCH,
+            title: `Technician Assigned (${order.businessId})`,
+            message: `Technician ${tech.displayName} has been assigned to your service appointment.`,
+            ctaLabel: 'View Order',
+            ctaUrl: `/services/orders/${order.id}`,
+            metadata: { serviceOrderId: order.id, technicianId: tech.id },
+            priority: 2,
+          })
+          .catch((err) => {
+            this.logger.warn(`Failed to notify customer of technician assignment: ${err.message}`);
+          });
+      }
 
       return {
         success: true,

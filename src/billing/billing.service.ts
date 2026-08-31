@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import {
   InvoiceStatus,
+  NotificationType,
   PaymentStatus,
   Prisma,
   UserRole,
@@ -14,6 +15,7 @@ import {
 import { RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { generateBusinessId } from 'src/common/utils/business-id.util';
 import { getPagination } from 'src/common/utils/pagination';
+import { NotificationsService } from 'src/notifications/notifications.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { RedisService } from 'src/redis';
 import Stripe from 'stripe';
@@ -33,6 +35,7 @@ export class BillingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly notificationsService: NotificationsService,
   ) {
     const stripeKey = process.env.STRIPE_SECRET_KEY;
     if (stripeKey && stripeKey.trim().length > 0 && !stripeKey.includes('...')) {
@@ -156,6 +159,25 @@ export class BillingService {
     });
 
     this.logger.log(`Invoice '${invoice.businessId}' created by Admin (${user.email})`);
+
+    // Notify Customer
+    if (invoice.customer?.userId) {
+      this.notificationsService
+        .create({
+          userId: invoice.customer.userId,
+          type: NotificationType.BILLING_INVOICE,
+          title: `Invoice ${invoice.businessId} Generated`,
+          message: `An invoice totaling $${Number(invoice.totalUsd).toFixed(2)} USD is ready for payment (Due: ${new Date(invoice.dueDate).toLocaleDateString()}).`,
+          ctaLabel: 'Pay Invoice',
+          ctaUrl: `/billing/invoices/${invoice.id}`,
+          metadata: { invoiceId: invoice.id, totalUsd: invoice.totalUsd },
+          sendEmail: true,
+          priority: 1,
+        })
+        .catch((err) => {
+          this.logger.warn(`Failed to notify customer of invoice: ${err.message}`);
+        });
+    }
 
     return {
       success: true,
@@ -396,6 +418,25 @@ export class BillingService {
           },
           include: this.invoiceInclude(),
         });
+
+        // Notify Customer
+        if (updatedInvoice.customer?.userId) {
+          this.notificationsService
+            .create({
+              userId: updatedInvoice.customer.userId,
+              type: NotificationType.BILLING_INVOICE,
+              title: `Payment Receipt: ${updatedInvoice.businessId}`,
+              message: `Payment of $${dto.amountUsd.toFixed(2)} USD was successfully received. Invoice status: ${newStatus}.`,
+              ctaLabel: 'View Invoice',
+              ctaUrl: `/billing/invoices/${updatedInvoice.id}`,
+              metadata: { invoiceId: updatedInvoice.id, amountUsd: dto.amountUsd },
+              sendEmail: true,
+              priority: 1,
+            })
+            .catch((err) => {
+              this.logger.warn(`Failed to notify customer of payment: ${err.message}`);
+            });
+        }
 
         return {
           success: true,

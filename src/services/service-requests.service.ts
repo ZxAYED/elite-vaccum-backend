@@ -8,6 +8,7 @@ import {
 import {
   AttachmentKind,
   CustomerStatus,
+  NotificationType,
   Prisma,
   RequestUrgency,
   ServiceCatalogStatus,
@@ -18,6 +19,7 @@ import {
 import { RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { generateBusinessId } from 'src/common/utils/business-id.util';
 import { getPagination } from 'src/common/utils/pagination';
+import { NotificationsService } from 'src/notifications/notifications.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { RedisService } from 'src/redis';
 import { CloudinaryUploadService } from 'src/storage/cloudinary-upload.service';
@@ -36,6 +38,7 @@ export class ServiceRequestsService {
     private readonly prisma: PrismaService,
     private readonly cloudinary: CloudinaryUploadService,
     private readonly redis: RedisService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private async uploadMulterFiles(
@@ -462,6 +465,44 @@ export class ServiceRequestsService {
           this.logger.warn(`Redis slot invalidation note: ${err.message}`);
         });
 
+      // Notify Customer
+      if (fullRecord?.customer?.userId) {
+        this.notificationsService
+          .create({
+            userId: fullRecord.customer.userId,
+            type: NotificationType.SERVICE_REQUEST_UPDATE,
+            title: `Service Request ${request.businessId} Received`,
+            message: `Your request for ${service.name} has been received and scheduled for review (${dto.preferredDate} - ${dto.timeWindow}).`,
+            ctaLabel: 'View Request',
+            ctaUrl: `/services/requests/${request.id}`,
+            metadata: { requestId: request.id, businessId: request.businessId },
+            sendEmail: true,
+            priority: 1,
+          })
+          .catch((err) => {
+            this.logger.warn(`Failed to notify customer of service request: ${err.message}`);
+          });
+      }
+
+      // Notify Admins
+      this.notificationsService
+        .notifyAdmins({
+          type: NotificationType.SERVICE_REQUEST_UPDATE,
+          title: `New Service Request: ${request.businessId}`,
+          message: `New request submitted by ${dto.fullName} for ${service.name} (${dto.preferredDate} - ${dto.timeWindow}).`,
+          ctaLabel: 'Review Request',
+          ctaUrl: `/admin/service-requests/${request.id}`,
+          metadata: {
+            requestId: request.id,
+            businessId: request.businessId,
+            symptoms: dto.symptoms,
+          },
+          priority: 1,
+        })
+        .catch((err) => {
+          this.logger.warn(`Failed to notify admins of new request: ${err.message}`);
+        });
+
       return {
         success: true,
         message: 'Service intake request submitted successfully and time slot reserved',
@@ -682,6 +723,24 @@ export class ServiceRequestsService {
       `Service Request '${request.businessId}' status updated to '${dto.status}' by ${user.email}`,
     );
 
+    if (updated.customer?.userId) {
+      this.notificationsService
+        .create({
+          userId: updated.customer.userId,
+          type: NotificationType.SERVICE_REQUEST_UPDATE,
+          title: `Service Request ${updated.businessId} Status Updated`,
+          message: `Your service request is now marked as ${dto.status.replace(/_/g, ' ')}.`,
+          ctaLabel: 'View Request',
+          ctaUrl: `/services/requests/${updated.id}`,
+          metadata: { requestId: updated.id, status: dto.status },
+          sendEmail: true,
+          priority: 2,
+        })
+        .catch((err) => {
+          this.logger.warn(`Failed to notify customer of status update: ${err.message}`);
+        });
+    }
+
     return {
       success: true,
       message: `Service request status updated to '${dto.status}'`,
@@ -725,6 +784,28 @@ export class ServiceRequestsService {
         where: { id },
         include: this.requestInclude(),
       });
+
+      if (fullRecord?.customer?.userId) {
+        this.notificationsService
+          .create({
+            userId: fullRecord.customer.userId,
+            type: NotificationType.SERVICE_REQUEST_UPDATE,
+            title: `Service Request ${request.businessId} Update`,
+            message: `Your service request could not be processed. Reason: "${dto.reason}".`,
+            ctaLabel: 'View Request',
+            ctaUrl: `/services/requests/${request.id}`,
+            metadata: {
+              requestId: request.id,
+              status: ServiceRequestStatus.REJECTED,
+              reason: dto.reason,
+            },
+            sendEmail: true,
+            priority: 1,
+          })
+          .catch((err) => {
+            this.logger.warn(`Failed to notify customer of rejection: ${err.message}`);
+          });
+      }
 
       return {
         success: true,

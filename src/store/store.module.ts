@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { NotificationsModule } from 'src/notifications/notifications.module';
 import { StoreAddressesController } from './addresses/addresses.controller';
 import { StoreAddressesService } from './addresses/addresses.service';
 import { StoreCartController } from './cart/cart.controller';
@@ -16,6 +17,7 @@ import { StoreReturnsService } from './returns/returns.service';
 import { StoreInvoicePdfService } from './store-invoice-pdf.service';
 
 @Module({
+  imports: [NotificationsModule],
   controllers: [
     StoreCategoriesController,
     StoreProductsController,

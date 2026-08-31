@@ -63,6 +63,54 @@ export class NotificationsService {
   }
 
   /**
+   * Helper to dispatch a notification to all active ADMIN users.
+   */
+  async notifyAdmins(data: Omit<CreateNotificationDto, 'userId'>) {
+    try {
+      const admins = await this.prisma.user.findMany({
+        where: { role: UserRole.ADMIN, isActive: true },
+        select: { id: true },
+      });
+
+      return Promise.all(
+        admins.map((admin) =>
+          this.create({
+            ...data,
+            userId: admin.id,
+          }),
+        ),
+      );
+    } catch (err: any) {
+      this.logger.error(`Failed to notify admins: ${err.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Helper to dispatch a notification to all active users with a specific role.
+   */
+  async notifyRole(role: UserRole, data: Omit<CreateNotificationDto, 'userId'>) {
+    try {
+      const users = await this.prisma.user.findMany({
+        where: { role, isActive: true },
+        select: { id: true },
+      });
+
+      return Promise.all(
+        users.map((u) =>
+          this.create({
+            ...data,
+            userId: u.id,
+          }),
+        ),
+      );
+    } catch (err: any) {
+      this.logger.error(`Failed to notify role ${role}: ${err.message}`);
+      return [];
+    }
+  }
+
+  /**
    * Core notification processor (called by BullMQ Worker or direct dispatcher).
    * Persists to PostgreSQL, computes Redis unread cache, broadcasts via Redis PubSub, and sends email.
    */

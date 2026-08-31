@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import {
   InvoiceStatus,
+  NotificationType,
   PaymentStatus,
   Prisma,
   ProductOrderStatus,
@@ -17,6 +18,7 @@ import {
 import { RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { generateBusinessId } from 'src/common/utils/business-id.util';
 import { getPagination } from 'src/common/utils/pagination';
+import { NotificationsService } from 'src/notifications/notifications.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { RedisService } from 'src/redis';
 import Stripe from 'stripe';
@@ -34,6 +36,7 @@ export class StoreOrdersService {
     private readonly prisma: PrismaService,
     private readonly productsService: StoreProductsService,
     private readonly redis: RedisService,
+    private readonly notificationsService: NotificationsService,
   ) {
     const stripeKey = process.env.STRIPE_SECRET_KEY;
     if (stripeKey && stripeKey.trim().length > 0 && !stripeKey.includes('...')) {
@@ -449,6 +452,47 @@ export class StoreOrdersService {
         return createdOrder;
       });
 
+      // Notify Customer & Admins
+      if (user?.id) {
+        this.notificationsService
+          .create({
+            userId: user.id,
+            type: NotificationType.ORDER_STATUS_UPDATE,
+            title: `Order ${order.businessId} Placed!`,
+            message: `Your order totaling $${Number(order.totalUsd).toFixed(2)} USD has been placed successfully.`,
+            ctaLabel: 'View Order',
+            ctaUrl: `/store/orders/${order.id}`,
+            metadata: {
+              orderId: order.id,
+              businessId: order.businessId,
+              totalUsd: order.totalUsd,
+            },
+            sendEmail: true,
+            priority: 1,
+          })
+          .catch((err) => {
+            this.logger.warn(`Failed to notify customer of new order: ${err.message}`);
+          });
+      }
+
+      this.notificationsService
+        .notifyAdmins({
+          type: NotificationType.ORDER_STATUS_UPDATE,
+          title: `New Store Order: ${order.businessId}`,
+          message: `New order placed for $${Number(order.totalUsd).toFixed(2)} USD by ${user?.email || 'Customer'}.`,
+          ctaLabel: 'Manage Order',
+          ctaUrl: `/admin/orders/${order.id}`,
+          metadata: {
+            orderId: order.id,
+            businessId: order.businessId,
+            totalUsd: order.totalUsd,
+          },
+          priority: 1,
+        })
+        .catch((err) => {
+          this.logger.warn(`Failed to notify admins of new order: ${err.message}`);
+        });
+
       // 7. Handle Payment Response
       if (isCod) {
         return {
@@ -727,6 +771,30 @@ export class StoreOrdersService {
           });
         }
       });
+
+      // Notify Customer
+      const fullOrder = await this.prisma.productOrder.findUnique({
+        where: { id: orderId },
+        include: { customer: true },
+      });
+
+      if (fullOrder?.customer?.userId) {
+        this.notificationsService
+          .create({
+            userId: fullOrder.customer.userId,
+            type: NotificationType.ORDER_STATUS_UPDATE,
+            title: `Payment Received for Order ${fullOrder.businessId}`,
+            message: `Your payment of $${Number(fullOrder.totalUsd).toFixed(2)} USD was successfully received. We're getting your order ready!`,
+            ctaLabel: 'View Order',
+            ctaUrl: `/store/orders/${fullOrder.id}`,
+            metadata: { orderId: fullOrder.id, transactionReference },
+            sendEmail: true,
+            priority: 1,
+          })
+          .catch((err) => {
+            this.logger.warn(`Failed to notify customer of payment: ${err.message}`);
+          });
+      }
 
       this.logger.log(`Order '${order.businessId}' marked as PAID successfully.`);
     } finally {
@@ -1014,6 +1082,44 @@ export class StoreOrdersService {
             },
           });
         }
+      }
+
+      // Notify Customer on status/tracking transition
+      if (updated.customer?.userId) {
+        let title = `Order ${updated.businessId} Update`;
+        let msg = `Your order status is now ${newStatus.replace(/_/g, ' ')}.`;
+        if (newStatus === ProductOrderStatus.SHIPPED) {
+          title = `Your Order ${updated.businessId} Has Shipped!`;
+          msg = `Your package is on the way via ${updated.shippingProvider || 'Carrier'}${updated.trackingNumber ? ` (Tracking: ${updated.trackingNumber})` : ''}.`;
+        } else if (newStatus === ProductOrderStatus.OUT_FOR_DELIVERY) {
+          title = `Order ${updated.businessId} Out For Delivery!`;
+          msg = `Your vacuum parts order is scheduled for delivery today!`;
+        } else if (newStatus === ProductOrderStatus.DELIVERED) {
+          title = `Order ${updated.businessId} Delivered!`;
+          msg = `Your package has arrived. Enjoy your purchase!`;
+        }
+
+        this.notificationsService
+          .create({
+            userId: updated.customer.userId,
+            type: NotificationType.ORDER_STATUS_UPDATE,
+            title,
+            message: msg,
+            ctaLabel: 'Track Order',
+            ctaUrl: `/store/orders/${updated.id}`,
+            metadata: {
+              orderId: updated.id,
+              status: newStatus,
+              trackingNumber: updated.trackingNumber,
+            },
+            sendEmail:
+              newStatus === ProductOrderStatus.SHIPPED ||
+              newStatus === ProductOrderStatus.DELIVERED,
+            priority: 1,
+          })
+          .catch((err) => {
+            this.logger.warn(`Failed to notify customer of order status: ${err.message}`);
+          });
       }
 
       return updated;

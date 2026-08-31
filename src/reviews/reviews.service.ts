@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  NotificationType,
   Prisma,
   ReviewModerationAction,
   ReviewStatus,
@@ -12,6 +13,7 @@ import {
 } from '@prisma/client';
 import { RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { getPagination } from 'src/common/utils/pagination';
+import { NotificationsService } from 'src/notifications/notifications.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateReviewDto } from './dto/create-review.dto';
 import { ModerateReviewDto, ReviewListQueryDto } from './dto/review-list-query.dto';
@@ -20,7 +22,10 @@ import { ModerateReviewDto, ReviewListQueryDto } from './dto/review-list-query.d
 export class ReviewsService {
   private readonly logger = new Logger(ReviewsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   private reviewInclude() {
     return {
@@ -107,6 +112,25 @@ export class ReviewsService {
     });
 
     this.logger.log(`Customer '${customer.displayName}' submitted ${dto.type} review (${dto.rating} stars)`);
+
+    // Notify Admins
+    this.notificationsService
+      .notifyAdmins({
+        type: NotificationType.REVIEW_MODERATION,
+        title: `New ${dto.type} Review (${dto.rating} Stars)`,
+        message: `Customer ${customer.displayName} submitted a ${dto.rating}-star review: "${dto.title}".`,
+        ctaLabel: 'Moderate Review',
+        ctaUrl: `/admin/reviews/${review.id}`,
+        metadata: {
+          reviewId: review.id,
+          rating: dto.rating,
+          type: dto.type,
+        },
+        priority: 2,
+      })
+      .catch((err) => {
+        this.logger.warn(`Failed to notify admins of new review: ${err.message}`);
+      });
 
     return {
       success: true,
@@ -273,6 +297,32 @@ export class ReviewsService {
           actorId: user.id,
         },
       });
+
+      // If published, notify customer
+      if (dto.action === ReviewModerationAction.PUBLISHED) {
+        const customer = await this.prisma.customer.findUnique({
+          where: { id: review.customerId },
+          select: { userId: true },
+        });
+
+        if (customer?.userId) {
+          this.notificationsService
+            .create({
+              userId: customer.userId,
+              type: NotificationType.REVIEW_MODERATION,
+              title: 'Your Review Has Been Published!',
+              message: `Your review "${review.title}" is now live on Elite Central Vacuum. Thank you for your feedback!`,
+              ctaLabel: 'View Review',
+              ctaUrl: `/reviews`,
+              metadata: { reviewId: review.id },
+              sendEmail: false,
+              priority: 2,
+            })
+            .catch((err) => {
+              this.logger.warn(`Failed to notify customer of review publication: ${err.message}`);
+            });
+        }
+      }
 
       return {
         success: true,

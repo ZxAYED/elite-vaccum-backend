@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  NotificationType,
   Prisma,
   QuotationStatus,
   ServiceOrderStatus,
@@ -17,6 +18,7 @@ import { generateBusinessId } from 'src/common/utils/business-id.util';
 import { getPagination } from 'src/common/utils/pagination';
 import { EmailService } from 'src/email/email.service';
 import { EmailTemplateKey } from 'src/email/types/email.types';
+import { NotificationsService } from 'src/notifications/notifications.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateQuotationDto } from './dto/create-quotation.dto';
 import {
@@ -34,6 +36,7 @@ export class QuotationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private isAdmin(user?: RequestUser | null) {
@@ -178,6 +181,29 @@ export class QuotationsService {
       });
 
       this.logger.log(`Quotation '${quotation.businessId}' created and automatically sent to customer (${serviceRequest.customer?.email}) by Admin (${user.email})`);
+
+      // Dispatch real-time in-app notification & BullMQ email to customer
+      if (serviceRequest.customer?.userId) {
+        this.notificationsService
+          .create({
+            userId: serviceRequest.customer.userId,
+            type: NotificationType.QUOTATION_UPDATE,
+            title: `Quotation Prepared for Service Request ${serviceRequest.businessId}`,
+            message: `A new itemized quotation (${quotation.businessId}) totaling $${total.toFixed(2)} USD is ready for your review.`,
+            ctaLabel: 'Review Quotation',
+            ctaUrl: `/quotations/${quotation.id}`,
+            metadata: {
+              quotationId: quotation.id,
+              serviceRequestId: serviceRequest.id,
+              totalUsd: total,
+            },
+            sendEmail: true,
+            priority: 1,
+          })
+          .catch((err) => {
+            this.logger.warn(`Failed to dispatch quotation notification: ${err.message}`);
+          });
+      }
 
       // Dispatch quotation notification email to customer
       if (serviceRequest.customer?.email) {
@@ -492,6 +518,25 @@ export class QuotationsService {
         include: this.quotationInclude(),
       });
 
+      // Dispatch Admin Real-Time Notification
+      this.notificationsService
+        .notifyAdmins({
+          type: NotificationType.QUOTATION_UPDATE,
+          title: `Quotation ${quotation.businessId} Accepted`,
+          message: `Customer ${quotation.customer.displayName || quotation.customer.email} accepted Quotation ${quotation.businessId} ($${Number(quotation.totalUsd).toFixed(2)}). Service Order ${serviceOrder.businessId} created.`,
+          ctaLabel: 'View Service Order',
+          ctaUrl: `/admin/service-orders/${serviceOrder.id}`,
+          metadata: {
+            quotationId: quotation.id,
+            serviceOrderId: serviceOrder.id,
+            totalUsd: quotation.totalUsd,
+          },
+          priority: 1,
+        })
+        .catch((err) => {
+          this.logger.warn(`Failed to notify admins of quotation acceptance: ${err.message}`);
+        });
+
       return {
         success: true,
         message: 'Quotation accepted and Service Order generated successfully',
@@ -551,9 +596,27 @@ export class QuotationsService {
         include: this.quotationInclude(),
       });
 
+      // Dispatch Admin Real-Time Notification
+      this.notificationsService
+        .notifyAdmins({
+          type: NotificationType.QUOTATION_UPDATE,
+          title: `Quotation ${quotation.businessId} Rejected`,
+          message: `Customer rejected Quotation ${quotation.businessId}. Reason: "${dto.reason || 'No reason specified'}".`,
+          ctaLabel: 'View Quotation',
+          ctaUrl: `/admin/quotations/${quotation.id}`,
+          metadata: {
+            quotationId: quotation.id,
+            reason: dto.reason,
+          },
+          priority: 2,
+        })
+        .catch((err) => {
+          this.logger.warn(`Failed to notify admins of quotation rejection: ${err.message}`);
+        });
+
       return {
         success: true,
-        message: 'Quotation rejected and audit recorded',
+        message: 'Quotation rejected successfully',
         quotation: fullQuotation,
       };
     });
