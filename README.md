@@ -104,6 +104,11 @@
 - **Cross-Node WebSocket Delivery**: Subscribed across cluster nodes via Redis Pub/Sub channels (`notifications:events`) to broadcast to rooms (`user:<id>`, `role:<ROLE>`, `broadcast`).
 - **Omnichannel Support**: In-app unread inbox counter, persistent PostgreSQL storage, and SMTP email notifications.
 
+### 💬 Enterprise Real-Time Live Support Chat
+- **Dual Communication Channels**: High-performance Socket.io WebSocket (`/chat` namespace) + REST fallback with Cloudinary photo/file uploads.
+- **Cluster Synchronization via Redis Pub/Sub**: Multi-server instant message broadcast, typing indicators, and read receipts (<10ms).
+- **BullMQ Offline Resilience**: Automatic 2-minute delayed offline check to dispatch email alerts when users or admins are away from their screens.
+
 ### 🤖 Google Gemini AI Diagnostics & Live DB Querying
 - **Natural Language Intake Analysis**: Extracts structured symptoms, urgency recommendations, and follow-up troubleshooting prompts using Gemini structured output.
 - **Live Database Tools**: Queries real-time active services, live products, real customer history, and service orders with graceful fallback.
@@ -112,6 +117,58 @@
 - **Global Throttling**: `@nestjs/throttler` layered rate limiting (`15 req/sec`, `60 req/10s`, `200 req/min`) protecting against DDoS and automated attacks.
 - **Atomic OTP Rate Limiting**: Dedicated Redis OTP flood prevention (max 4 attempts / 5 mins).
 - **Session Control**: HttpOnly cookie refresh tokens, JWT Bearer verification, and revocable database sessions.
+
+---
+
+## 👥 Role-Based Workflow Architecture (Admin vs. Customer vs. Technician)
+
+```
+===================================================================================
+1. PRODUCT & STORE DOMAIN
+===================================================================================
+[ADMIN]                                              [CUSTOMER]
+• POST /categories (Create)                          • GET /categories (Browse categories)
+• POST /products (Create with Cloudinary media)      • GET /products (Filter, search, paginate)
+• PATCH /products/:id (Edit specs, price, SKU)       • GET /products/:id (View specs & photos)
+• PATCH /products/:id/stock (Update inventory)       • POST /store/cart/items (Add to Cart)
+• PATCH /products/:id/status (Toggle ACTIVE)         • POST /store/checkout (Stripe / COD)
+• PATCH /store/orders/:id/status (SHIPPED + carrier) • GET /store/orders/me (Track order timeline)
+
+===================================================================================
+2. SERVICE INTAKE, QUOTATIONS & FIELD DISPATCH DOMAIN
+===================================================================================
+[CUSTOMER]                                           [ADMIN / TECHNICIAN]
+1. Selects service & inspects symptoms
+2. GET /schedule/slots (Check available slots)
+3. POST /services/requests (Submit intake + photos)  ───► [ADMIN] GET /services/requests (Review intake)
+                                                     ───► [ADMIN] POST /quotations (Draft itemized quote)
+4. GET /quotations/me (View itemized quote)          ◄─── [ADMIN] PATCH /quotations/:id/send (Send to customer)
+5. PATCH /quotations/:id/accept (Sign & accept)      ───► [SYSTEM] Auto-creates ServiceOrder & Appointment
+                                                     ───► [ADMIN] POST /service-orders/:id/dispatch (Assign tech)
+                                                     ───► [TECH] PATCH /service-orders/:id/status (EN_ROUTE -> IN_PROGRESS)
+                                                     ───► [TECH] POST /service-orders/:id/reports (Complete job report)
+6. GET /service-orders/me (Live status & tech ETA)
+
+===================================================================================
+3. BILLING, INVOICES & PAYMENTS DOMAIN
+===================================================================================
+[ADMIN]                                              [CUSTOMER]
+• POST /billing/invoices (Generate invoice)          • GET /billing/invoices/me (View invoices)
+• GET /billing/invoices (Admin audit & filter)       • GET /billing/invoices/:id/html (Print PDF/HTML)
+• POST /billing/invoices/:id/record-payment (Offline)• POST /billing/invoices/:id/stripe/payment-intent
+• POST /billing/invoices/:id/refund (Issue refund)   • POST /billing/invoices/:id/stripe/confirm (Pay online)
+
+===================================================================================
+4. LIVE REAL-TIME SUPPORT CHAT DOMAIN
+===================================================================================
+[CUSTOMER]                                           [ADMIN]
+• POST /chat/conversations (Start Support Chat)      • GET /chat/conversations (Admin Live Inbox)
+• WS: chat:send_message (Send text/questions)        • WS: chat:send_message (Admin instant reply)
+• REST: POST /chat/conversations/:id/messages (Upload photos)
+• WS: chat:typing (Live typing indicator)            • WS: chat:typing (Live typing indicator)
+• WS: chat:mark_read (Read receipts)                 • WS: chat:mark_read (Read receipts)
+• BullMQ alerts via Email if recipient offline       • BullMQ alerts via Email if recipient offline
+```
 
 ---
 
