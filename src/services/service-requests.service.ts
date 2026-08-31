@@ -287,9 +287,9 @@ export class ServiceRequestsService {
     } satisfies Prisma.ServiceRequestInclude;
   }
 
-  // ==========================================
+
   // INTAKE & CREATION
-  // ==========================================
+
 
   private parseDateTime(dateStr: string, timeStr: string): Date {
     const [year, month, day] = dateStr.split('-').map(Number);
@@ -512,9 +512,9 @@ export class ServiceRequestsService {
     });
   }
 
-  // ==========================================
+
   // REQUEST QUERIES
-  // ==========================================
+
 
   async getMyRequests(
     query: ServiceRequestListQueryDto,
@@ -694,9 +694,9 @@ export class ServiceRequestsService {
     return request;
   }
 
-  // ==========================================
+
   // ADMIN STATUS TRANSITIONS & TRIAGE
-  // ==========================================
+
 
   async updateStatus(
     id: string,

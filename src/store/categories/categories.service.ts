@@ -316,9 +316,9 @@ export class StoreCategoriesService {
     };
   }
 
-  // ==========================================
+
   // CACHE INVALIDATION HELPER
-  // ==========================================
+
 
   async invalidateCategoryCache(categoryId?: string, slug?: string) {
     try {

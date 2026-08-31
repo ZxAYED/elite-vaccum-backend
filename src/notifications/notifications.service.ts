@@ -37,9 +37,9 @@ export class NotificationsService {
     return user?.role === UserRole.ADMIN;
   }
 
-  // ==========================================
+
   // DISPATCH NOTIFICATION (BullMQ Queue)
-  // ==========================================
+
 
   /**
    * Enqueues a notification into the BullMQ background queue for asynchronous,
@@ -219,9 +219,9 @@ export class NotificationsService {
     return this.processNotification(dto);
   }
 
-  // ==========================================
+
   // QUERY NOTIFICATIONS
-  // ==========================================
+
 
   /**
    * Retrieves paginated notifications for a specific user with metadata & unread summary.
@@ -282,9 +282,9 @@ export class NotificationsService {
     return count;
   }
 
-  // ==========================================
+
   // MARK AS READ (Single & All)
-  // ==========================================
+
 
   /**
    * Marks a single notification as read and publishes real-time Redis PubSub events.
@@ -402,9 +402,9 @@ export class NotificationsService {
     };
   }
 
-  // ==========================================
+
   // DELETE NOTIFICATION
-  // ==========================================
+
 
   /**
    * Deletes a single notification.
@@ -448,9 +448,9 @@ export class NotificationsService {
     };
   }
 
-  // ==========================================
+
   // NOTIFICATION PREFERENCES
-  // ==========================================
+
 
   /**
    * Retrieves notification channel preferences for a user.

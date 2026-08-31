@@ -959,9 +959,9 @@ export class StoreProductsService {
     return updated;
   }
 
-  // ==========================================
+
   // CACHE INVALIDATION HELPER
-  // ==========================================
+
 
   /**
    * Invalidates Redis cache for product details and public product listings.

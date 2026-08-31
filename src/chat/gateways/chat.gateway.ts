@@ -162,9 +162,9 @@ export class ChatGateway
     }
   }
 
-  // ==========================================
+
   // CLIENT EVENTS
-  // ==========================================
+
 
   @SubscribeMessage('chat:join_conversation')
   async handleJoinConversation(

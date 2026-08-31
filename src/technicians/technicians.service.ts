@@ -7,12 +7,16 @@ import { Prisma, TechnicianStatus, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { getPagination } from 'src/common/utils/pagination';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { CloudinaryUploadService } from 'src/storage/cloudinary-upload.service';
 import { CreateTechnicianDto } from './dto/create-technician.dto';
 import { TechnicianListQueryDto, UpdateTechnicianDto } from './dto/update-technician.dto';
 
 @Injectable()
 export class TechniciansService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cloudinaryService: CloudinaryUploadService,
+  ) {}
 
   private includeRelations() {
     return {
@@ -268,4 +272,554 @@ export class TechniciansService {
       message: 'Technician deleted successfully',
     };
   }
+
+
+  // TECHNICIAN PORTAL (SELF-SERVICE / MOBILE)
+
+
+  private async getTechnicianByUserId(userId: string) {
+    const technician = await this.prisma.technician.findUnique({
+      where: { userId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            role: true,
+            isActive: true,
+          },
+        },
+      },
+    });
+
+    if (!technician) {
+      throw new NotFoundException('Technician profile not found for this user account');
+    }
+
+    return technician;
+  }
+
+  async getMeProfile(userId: string) {
+    const technician = await this.getTechnicianByUserId(userId);
+
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const jobsThisMonth = await this.prisma.serviceOrder.count({
+      where: {
+        assignedTechnicianId: technician.id,
+        status: 'COMPLETED',
+        updatedAt: { gte: startOfMonth },
+      },
+    });
+
+    const upcomingAssignments = await this.prisma.appointment.count({
+      where: {
+        technicianId: technician.id,
+        startAt: { gte: now },
+        status: { in: ['SCHEDULED', 'RESCHEDULED', 'CONFIRMED'] },
+      },
+    });
+
+    return {
+      id: technician.id,
+      userId: technician.userId,
+      displayName: technician.displayName,
+      email: technician.email,
+      phone: technician.phone,
+      role: 'TECHNICIAN',
+      status: technician.status,
+      availability: technician.availability || 'AVAILABLE',
+      timezone: technician.timezone || 'America/New_York',
+      avatarUrl: technician.avatarUrl || null,
+      rating: Number(technician.rating) || 5.0,
+      serviceSummary: {
+        completedJobs: technician.completedJobs,
+        jobsThisMonth,
+        upcomingAssignments,
+        specializations: technician.specializations || [],
+      },
+    };
+  }
+
+  async updateMeProfile(userId: string, dto: { displayName?: string; phone?: string; specializations?: string[] }) {
+    const technician = await this.getTechnicianByUserId(userId);
+
+    const updated = await this.prisma.technician.update({
+      where: { id: technician.id },
+      data: {
+        ...(dto.displayName ? { displayName: dto.displayName.trim() } : {}),
+        ...(dto.phone ? { phone: dto.phone.trim() } : {}),
+        ...(dto.specializations ? { specializations: dto.specializations } : {}),
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Profile updated successfully',
+      profile: updated,
+    };
+  }
+
+  async updateMeAvatar(userId: string, file: Express.Multer.File) {
+    const technician = await this.getTechnicianByUserId(userId);
+
+    const uploadResult = await this.cloudinaryService.uploadFile({
+      fileBuffer: file.buffer,
+      originalName: file.originalname,
+      mimeType: file.mimetype,
+      folder: 'elite-vacuum/technicians',
+    });
+
+    const updated = await this.prisma.technician.update({
+      where: { id: technician.id },
+      data: { avatarUrl: uploadResult.url },
+    });
+
+    return {
+      success: true,
+      message: 'Profile photo updated successfully',
+      avatarUrl: updated.avatarUrl,
+    };
+  }
+
+  async removeMeAvatar(userId: string) {
+    const technician = await this.getTechnicianByUserId(userId);
+
+    await this.prisma.technician.update({
+      where: { id: technician.id },
+      data: { avatarUrl: null },
+    });
+
+    return {
+      success: true,
+      message: 'Profile photo removed successfully',
+    };
+  }
+
+  async updateMeAvailability(userId: string, dto: { availability: string; timezone?: string }) {
+    const technician = await this.getTechnicianByUserId(userId);
+
+    const updated = await this.prisma.technician.update({
+      where: { id: technician.id },
+      data: {
+        availability: dto.availability,
+        ...(dto.timezone ? { timezone: dto.timezone } : {}),
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Availability status updated successfully',
+      availability: updated.availability,
+      timezone: updated.timezone,
+    };
+  }
+
+  async getMeOverview(userId: string) {
+    const technician = await this.getTechnicianByUserId(userId);
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    // 1. Calculate Summary Metric Counters
+    const todayJobsCount = await this.prisma.appointment.count({
+      where: {
+        technicianId: technician.id,
+        startAt: { gte: todayStart, lte: todayEnd },
+      },
+    });
+
+    const activeJobsCount = await this.prisma.serviceOrder.count({
+      where: {
+        assignedTechnicianId: technician.id,
+        status: { in: ['TECHNICIAN_ASSIGNED', 'ON_THE_WAY', 'ARRIVED', 'IN_PROGRESS'] },
+      },
+    });
+
+    const completedTodayCount = await this.prisma.serviceOrder.count({
+      where: {
+        assignedTechnicianId: technician.id,
+        status: 'COMPLETED',
+        updatedAt: { gte: todayStart, lte: todayEnd },
+      },
+    });
+
+    const upcomingJobsCount = await this.prisma.appointment.count({
+      where: {
+        technicianId: technician.id,
+        startAt: { gt: todayEnd },
+      },
+    });
+
+    // 2. Today's Schedule
+    const todayAppointments = await this.prisma.appointment.findMany({
+      where: {
+        technicianId: technician.id,
+        startAt: { gte: todayStart, lte: todayEnd },
+      },
+      include: {
+        serviceOrder: {
+          include: {
+            customer: true,
+            serviceRequest: { include: { service: true } },
+            addressRef: true,
+          },
+        },
+      },
+      orderBy: { startAt: 'asc' },
+    });
+
+    // 3. Next Appointment
+    const nextAppointment = await this.prisma.appointment.findFirst({
+      where: {
+        technicianId: technician.id,
+        startAt: { gte: now },
+        status: { in: ['SCHEDULED', 'RESCHEDULED', 'CONFIRMED'] },
+      },
+      include: {
+        serviceOrder: {
+          include: {
+            customer: true,
+            serviceRequest: { include: { service: true } },
+            addressRef: true,
+          },
+        },
+      },
+      orderBy: { startAt: 'asc' },
+    });
+
+    // 4. Upcoming Jobs (after today)
+    const upcomingAppointments = await this.prisma.appointment.findMany({
+      where: {
+        technicianId: technician.id,
+        startAt: { gt: todayEnd },
+      },
+      take: 5,
+      include: {
+        serviceOrder: {
+          include: {
+            customer: true,
+            serviceRequest: { include: { service: true } },
+            addressRef: true,
+          },
+        },
+      },
+      orderBy: { startAt: 'asc' },
+    });
+
+    // 5. Recently Completed Jobs
+    const recentlyCompleted = await this.prisma.serviceOrder.findMany({
+      where: {
+        assignedTechnicianId: technician.id,
+        status: 'COMPLETED',
+      },
+      take: 5,
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        customer: true,
+        serviceRequest: { include: { service: true } },
+      },
+    });
+
+    const formatTimeWindow = (start: Date, end: Date) => {
+      const formatTime = (d: Date) => d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      return `${formatTime(start)} - ${formatTime(end)}`;
+    };
+
+    return {
+      summary: {
+        availability: technician.availability || 'AVAILABLE',
+        todayJobsCount,
+        activeJobsCount,
+        completedTodayCount,
+        upcomingJobsCount,
+        completedTotalCount: technician.completedJobs,
+      },
+      todaySchedule: todayAppointments.map((apt) => ({
+        appointmentId: apt.id,
+        serviceOrderId: apt.serviceOrderId,
+        businessId: apt.serviceOrder?.businessId,
+        serviceName: apt.serviceOrder?.serviceRequest?.service?.name || 'General Service',
+        timeWindow: formatTimeWindow(apt.startAt, apt.endAt),
+        status: apt.status,
+        customerName: apt.serviceOrder?.customer?.displayName || `${apt.serviceOrder?.customer?.firstName} ${apt.serviceOrder?.customer?.lastName}`,
+        customerPhone: apt.serviceOrder?.customer?.phone || apt.serviceOrder?.customer?.cellphone,
+        propertyAddress: apt.serviceOrder?.addressRef
+          ? `${apt.serviceOrder.addressRef.line1}, ${apt.serviceOrder.addressRef.city}, ${apt.serviceOrder.addressRef.state}`
+          : apt.serviceOrder?.serviceRequest?.propertyLabel,
+      })),
+      nextAppointment: nextAppointment
+        ? {
+            appointmentId: nextAppointment.id,
+            serviceOrderId: nextAppointment.serviceOrderId,
+            businessId: nextAppointment.serviceOrder?.businessId,
+            serviceName: nextAppointment.serviceOrder?.serviceRequest?.service?.name || 'General Service',
+            scheduledDate: nextAppointment.startAt,
+            timeWindow: formatTimeWindow(nextAppointment.startAt, nextAppointment.endAt),
+            status: nextAppointment.status,
+            customerName: nextAppointment.serviceOrder?.customer?.displayName || `${nextAppointment.serviceOrder?.customer?.firstName} ${nextAppointment.serviceOrder?.customer?.lastName}`,
+            customerPhone: nextAppointment.serviceOrder?.customer?.phone || nextAppointment.serviceOrder?.customer?.cellphone,
+            propertyAddress: nextAppointment.serviceOrder?.addressRef
+              ? `${nextAppointment.serviceOrder.addressRef.line1}, ${nextAppointment.serviceOrder.addressRef.city}, ${nextAppointment.serviceOrder.addressRef.state}`
+              : nextAppointment.serviceOrder?.serviceRequest?.propertyLabel,
+          }
+        : null,
+      upcomingJobs: upcomingAppointments.map((apt) => ({
+        appointmentId: apt.id,
+        serviceOrderId: apt.serviceOrderId,
+        businessId: apt.serviceOrder?.businessId,
+        serviceName: apt.serviceOrder?.serviceRequest?.service?.name || 'General Service',
+        scheduledDate: apt.startAt,
+        timeWindow: formatTimeWindow(apt.startAt, apt.endAt),
+        status: apt.status,
+        customerName: apt.serviceOrder?.customer?.displayName || `${apt.serviceOrder?.customer?.firstName} ${apt.serviceOrder?.customer?.lastName}`,
+        propertyAddress: apt.serviceOrder?.addressRef
+          ? `${apt.serviceOrder.addressRef.line1}, ${apt.serviceOrder.addressRef.city}, ${apt.serviceOrder.addressRef.state}`
+          : apt.serviceOrder?.serviceRequest?.propertyLabel,
+      })),
+      recentlyCompleted: recentlyCompleted.map((so) => ({
+        serviceOrderId: so.id,
+        businessId: so.businessId,
+        serviceName: so.serviceRequest?.service?.name || 'General Service',
+        customerName: so.customer?.displayName || `${so.customer?.firstName} ${so.customer?.lastName}`,
+        completedAt: so.updatedAt,
+        totalAmountUsd: so.totalUsd,
+      })),
+      recentActivity: [],
+    };
+  }
+
+  async getMeJobs(userId: string, query: { tab?: string; page?: number; limit?: number }) {
+    const technician = await this.getTechnicianByUserId(userId);
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    // Global counters for tabs
+    const [todayCount, upcomingCount, activeCount, completedCount] = await Promise.all([
+      this.prisma.appointment.count({
+        where: {
+          technicianId: technician.id,
+          startAt: { gte: todayStart, lte: todayEnd },
+        },
+      }),
+      this.prisma.appointment.count({
+        where: {
+          technicianId: technician.id,
+          startAt: { gt: todayEnd },
+        },
+      }),
+      this.prisma.serviceOrder.count({
+        where: {
+          assignedTechnicianId: technician.id,
+          status: { in: ['TECHNICIAN_ASSIGNED', 'ON_THE_WAY', 'ARRIVED', 'IN_PROGRESS'] },
+        },
+      }),
+      this.prisma.serviceOrder.count({
+        where: {
+          assignedTechnicianId: technician.id,
+          status: 'COMPLETED',
+        },
+      }),
+    ]);
+
+    let where: Prisma.ServiceOrderWhereInput = {
+      assignedTechnicianId: technician.id,
+    };
+
+    if (query.tab === 'today') {
+      where = {
+        assignedTechnicianId: technician.id,
+        appointments: {
+          some: {
+            startAt: { gte: todayStart, lte: todayEnd },
+          },
+        },
+      };
+    } else if (query.tab === 'upcoming') {
+      where = {
+        assignedTechnicianId: technician.id,
+        appointments: {
+          some: {
+            startAt: { gt: todayEnd },
+          },
+        },
+      };
+    } else if (query.tab === 'in_progress') {
+      where = {
+        assignedTechnicianId: technician.id,
+        status: { in: ['TECHNICIAN_ASSIGNED', 'ON_THE_WAY', 'ARRIVED', 'IN_PROGRESS'] },
+      };
+    } else if (query.tab === 'completed') {
+      where = {
+        assignedTechnicianId: technician.id,
+        status: 'COMPLETED',
+      };
+    }
+
+    const totalItems = await this.prisma.serviceOrder.count({ where });
+    const { skip, take, meta } = getPagination(query.page, query.limit, totalItems);
+
+    const serviceOrders = await this.prisma.serviceOrder.findMany({
+      where,
+      skip,
+      take,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        customer: true,
+        serviceRequest: { include: { service: true } },
+        appointments: { orderBy: { startAt: 'desc' }, take: 1 },
+        etas: { orderBy: { updatedAt: 'desc' }, take: 1 },
+        addressRef: true,
+      },
+    });
+
+    const formatTimeWindow = (start?: Date, end?: Date) => {
+      if (!start || !end) return null;
+      const formatTime = (d: Date) => d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      return `${formatTime(start)} - ${formatTime(end)}`;
+    };
+
+    const items = serviceOrders.map((so) => ({
+      id: so.id,
+      businessId: so.businessId,
+      status: so.status,
+      scheduledDate: so.appointments[0]?.startAt || null,
+      timeWindow: formatTimeWindow(so.appointments[0]?.startAt, so.appointments[0]?.endAt),
+      customer: {
+        id: so.customer?.id,
+        displayName: so.customer?.displayName || `${so.customer?.firstName} ${so.customer?.lastName}`,
+        phone: so.customer?.phone || so.customer?.cellphone,
+        email: so.customer?.email,
+      },
+      propertyAddress: so.addressRef
+        ? `${so.addressRef.line1}, ${so.addressRef.city}, ${so.addressRef.state}`
+        : so.serviceRequest?.propertyLabel,
+      service: {
+        name: so.serviceRequest?.service?.name || 'General Service',
+        slug: so.serviceRequest?.service?.slug,
+      },
+      symptoms: so.serviceRequest?.symptoms || [],
+      etaMinutes: so.etas[0]?.minutes || null,
+      totalAmountUsd: so.totalUsd,
+      createdAt: so.createdAt,
+    }));
+
+    return {
+      counts: {
+        today: todayCount,
+        upcoming: upcomingCount,
+        active: activeCount,
+        completed: completedCount,
+      },
+      items,
+      meta,
+    };
+  }
+
+  async getMeSchedule(userId: string, query: { from?: string; to?: string }) {
+    const technician = await this.getTechnicianByUserId(userId);
+
+    const now = new Date();
+    const fromDate = query.from
+      ? new Date(query.from)
+      : new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
+    const toDate = query.to
+      ? new Date(query.to)
+      : new Date(fromDate.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+    const appointments = await this.prisma.appointment.findMany({
+      where: {
+        technicianId: technician.id,
+        startAt: { gte: fromDate, lte: toDate },
+      },
+      include: {
+        serviceOrder: {
+          include: {
+            customer: true,
+            serviceRequest: { include: { service: true } },
+            addressRef: true,
+          },
+        },
+      },
+      orderBy: [{ startAt: 'asc' }],
+    });
+
+    const formatTimeWindow = (start: Date, end: Date) => {
+      const formatTime = (d: Date) => d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      return `${formatTime(start)} - ${formatTime(end)}`;
+    };
+
+    // Group appointments by date (YYYY-MM-DD)
+    const groupedMap = new Map<string, any[]>();
+    for (const apt of appointments) {
+      const dateKey = apt.startAt.toISOString().split('T')[0];
+      if (!groupedMap.has(dateKey)) {
+        groupedMap.set(dateKey, []);
+      }
+      groupedMap.get(dateKey)!.push({
+        id: apt.id,
+        serviceOrderId: apt.serviceOrderId,
+        businessId: apt.serviceOrder?.businessId,
+        serviceName: apt.serviceOrder?.serviceRequest?.service?.name || 'General Service',
+        timeWindow: formatTimeWindow(apt.startAt, apt.endAt),
+        status: apt.status,
+        customerName: apt.serviceOrder?.customer?.displayName || `${apt.serviceOrder?.customer?.firstName} ${apt.serviceOrder?.customer?.lastName}`,
+        customerPhone: apt.serviceOrder?.customer?.phone || apt.serviceOrder?.customer?.cellphone,
+        propertyAddress: apt.serviceOrder?.addressRef
+          ? `${apt.serviceOrder.addressRef.line1}, ${apt.serviceOrder.addressRef.city}, ${apt.serviceOrder.addressRef.state}`
+          : apt.serviceOrder?.serviceRequest?.propertyLabel,
+      });
+    }
+
+    const todayStr = now.toISOString().split('T')[0];
+    const days = Array.from(groupedMap.entries()).map(([date, items]) => ({
+      date,
+      isToday: date === todayStr,
+      appointmentsCount: items.length,
+      appointments: items,
+    }));
+
+    return {
+      range: {
+        from: fromDate.toISOString(),
+        to: toDate.toISOString(),
+      },
+      days,
+    };
+  }
+
+  async requestScheduleChange(userId: string, dto: { serviceOrderId?: string; reason: string; proposedDate?: string; proposedTimeWindow?: string }) {
+    const technician = await this.getTechnicianByUserId(userId);
+
+    // Record internal note if service order provided
+    if (dto.serviceOrderId) {
+      const serviceOrder = await this.prisma.serviceOrder.findUnique({
+        where: { id: dto.serviceOrderId },
+        select: { customerId: true },
+      });
+
+      if (serviceOrder) {
+        await this.prisma.customerInternalNote.create({
+          data: {
+            customerId: serviceOrder.customerId,
+            createdById: userId,
+            title: 'Schedule Change Request',
+            body: `[SCHEDULE CHANGE REQUEST by Tech ${technician.displayName}]: ${dto.reason}. Proposed: ${dto.proposedDate || 'N/A'} (${dto.proposedTimeWindow || 'N/A'})`,
+          },
+        });
+      }
+    }
+
+    return {
+      success: true,
+      message: 'Schedule change request submitted to admin team',
+    };
+  }
 }
+

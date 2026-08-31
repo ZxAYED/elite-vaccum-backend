@@ -1078,6 +1078,331 @@ chatSocket.on('connect', () => {
 
 ---
 
+## 🛠️ Phase 17: Field Technician Portal & Mobile App
+
+### 🔀 Unified Auth & Role-Based Navigation
+All users (Customers, Admins, Technicians) authenticate through the **same** login endpoint:
+- **`POST /auth/login`** returns `{ token, refreshToken, user: { id, email, role: "TECHNICIAN" | "ADMIN" | "CUSTOMER" } }`.
+- The Frontend router inspects `user.role`:
+  - `CUSTOMER` $\rightarrow$ Redirect to `/account` or store shopping flow.
+  - `ADMIN` $\rightarrow$ Redirect to `/admin/dashboard`.
+  - `TECHNICIAN` $\rightarrow$ Redirect to `/technician/overview`.
+
+---
+
+### 17.1 Screen 1: Technician Overview & Dashboard
+- **Endpoint**: `GET /technicians/me/overview`
+- **Access**: `TECHNICIAN`
+- **Response `200 OK`**:
+```json
+{
+  "summary": {
+    "availability": "AVAILABLE",
+    "todayJobsCount": 2,
+    "activeJobsCount": 1,
+    "completedTodayCount": 1,
+    "upcomingJobsCount": 4,
+    "completedTotalCount": 104
+  },
+  "todaySchedule": [
+    {
+      "appointmentId": "uuid-apt-1",
+      "serviceOrderId": "uuid-so-1",
+      "businessId": "SO-10023",
+      "serviceName": "Central Vacuum Pipe Unclogging",
+      "timeWindow": "09:00 AM - 11:00 AM",
+      "status": "CONFIRMED",
+      "customerName": "John Doe",
+      "customerPhone": "+1 555-0199",
+      "propertyAddress": "123 Ocean Ave, Suite 400, Brooklyn, NY"
+    }
+  ],
+  "nextAppointment": {
+    "appointmentId": "uuid-apt-2",
+    "serviceOrderId": "uuid-so-2",
+    "businessId": "SO-10024",
+    "serviceName": "Full Inlet System Diagnostic & Motor Inspection",
+    "scheduledDate": "2026-09-01T13:00:00.000Z",
+    "timeWindow": "01:00 PM - 03:00 PM",
+    "status": "CONFIRMED",
+    "customerName": "Alice Smith",
+    "customerPhone": "+1 555-0234",
+    "propertyAddress": "742 Evergreen Terrace, Staten Island, NY"
+  },
+  "upcomingJobs": [
+    {
+      "appointmentId": "uuid-apt-3",
+      "serviceOrderId": "uuid-so-3",
+      "businessId": "SO-10025",
+      "serviceName": "Annual System Tune-Up",
+      "scheduledDate": "2026-09-02T10:00:00.000Z",
+      "timeWindow": "10:00 AM - 12:00 PM",
+      "status": "CONFIRMED",
+      "customerName": "Robert Vance",
+      "propertyAddress": "55 Wallaby Way, Queens, NY"
+    }
+  ],
+  "recentlyCompleted": [
+    {
+      "serviceOrderId": "uuid-so-0",
+      "businessId": "SO-10020",
+      "serviceName": "Filter Replacement & Suction Test",
+      "customerName": "Eleanor Shellstrop",
+      "completedAt": "2026-08-31T15:30:00.000Z",
+      "totalAmountUsd": "185.00"
+    }
+  ]
+}
+```
+
+---
+
+### 17.2 Screen 2: My Assigned Jobs
+- **Endpoint**: `GET /technicians/me/jobs`
+- **Access**: `TECHNICIAN`
+- **Query Params**:
+  - `tab`: `today` | `upcoming` | `in_progress` | `completed` | `all` (default: `all`)
+  - `page`: `1`
+  - `limit`: `20`
+- **Response `200 OK`**:
+```json
+{
+  "counts": {
+    "today": 2,
+    "upcoming": 4,
+    "active": 1,
+    "completed": 104
+  },
+  "items": [
+    {
+      "id": "uuid-so-1",
+      "businessId": "SO-10023",
+      "status": "IN_PROGRESS",
+      "scheduledDate": "2026-08-31T09:00:00.000Z",
+      "timeWindow": "09:00 AM - 11:00 AM",
+      "customer": {
+        "id": "uuid-cust-1",
+        "displayName": "John Doe",
+        "phone": "+1 555-0199",
+        "email": "john@example.com"
+      },
+      "propertyAddress": "123 Ocean Ave, Brooklyn, NY",
+      "service": {
+        "name": "Central Vacuum Pipe Unclogging",
+        "slug": "central-vac-unclogging"
+      },
+      "symptoms": ["Zero suction on 2nd floor", "Whistling noise near utility closet"],
+      "etaMinutes": 10,
+      "totalAmountUsd": "249.00",
+      "createdAt": "2026-08-30T10:00:00.000Z"
+    }
+  ],
+  "meta": { "totalItems": 1, "currentPage": 1, "totalPages": 1 }
+}
+```
+
+---
+
+### 17.3 Screen 3: Schedule Calendar & Change Requests
+#### 1. View Calendar Schedule
+- **Endpoint**: `GET /technicians/me/schedule`
+- **Access**: `TECHNICIAN`
+- **Query Params**: `from=2026-08-31&to=2026-09-07`
+- **Response `200 OK`**:
+```json
+{
+  "range": {
+    "from": "2026-08-31T00:00:00.000Z",
+    "to": "2026-09-07T00:00:00.000Z"
+  },
+  "days": [
+    {
+      "date": "2026-08-31",
+      "isToday": true,
+      "appointmentsCount": 2,
+      "appointments": [
+        {
+          "id": "uuid-apt-1",
+          "serviceOrderId": "uuid-so-1",
+          "businessId": "SO-10023",
+          "serviceName": "Central Vacuum Pipe Unclogging",
+          "timeWindow": "09:00 AM - 11:00 AM",
+          "status": "CONFIRMED",
+          "customerName": "John Doe",
+          "customerPhone": "+1 555-0199",
+          "propertyAddress": "123 Ocean Ave, Brooklyn, NY"
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### 2. Request Schedule Change
+- **Endpoint**: `POST /technicians/me/schedule-change-request`
+- **Access**: `TECHNICIAN`
+- **Body**:
+```json
+{
+  "serviceOrderId": "uuid-so-1",
+  "reason": "Customer requested reschedule due to plumbing emergency at property",
+  "proposedDate": "2026-09-02",
+  "proposedTimeWindow": "02:00 PM - 04:00 PM"
+}
+```
+- **Response `201 Created`**:
+```json
+{
+  "success": true,
+  "message": "Schedule change request submitted to admin team"
+}
+```
+
+---
+
+### 17.4 Screen 4: Technician Profile & Stats
+#### 1. Get Profile Details
+- **Endpoint**: `GET /technicians/me/profile`
+- **Access**: `TECHNICIAN`
+- **Response `200 OK`**:
+```json
+{
+  "id": "uuid-tech-1",
+  "userId": "uuid-user-1",
+  "displayName": "Alex Rivera",
+  "email": "alex.tech@elitevacuum.com",
+  "phone": "+1 555-0188",
+  "role": "TECHNICIAN",
+  "status": "ACTIVE",
+  "availability": "AVAILABLE",
+  "timezone": "America/New_York",
+  "avatarUrl": "https://res.cloudinary.com/.../avatar.jpg",
+  "bio": "Certified Master Technician specializing in residential & commercial central vacuum infrastructure with 8+ years experience.",
+  "specializations": ["Central Vacuum Installation", "Pipe Unclogging", "Motor Diagnostics", "Retraflex Hose Systems"],
+  "stats": {
+    "completedJobs": 104,
+    "jobsThisMonth": 12,
+    "upcomingAssignments": 4,
+    "joinedAt": "2024-03-15T00:00:00.000Z"
+  }
+}
+```
+
+#### 2. Update Profile Information
+- **Endpoint**: `PATCH /technicians/me/profile`
+- **Access**: `TECHNICIAN`
+- **Body**:
+```json
+{
+  "displayName": "Alex Rivera, Sr. Tech",
+  "phone": "+1 555-0190",
+  "bio": "Updated bio text here...",
+  "specializations": ["Central Vac Specialist", "Pipe Unclogging", "Smart Unit Retrofits"]
+}
+```
+
+#### 3. Upload / Change Photo
+- **Endpoint**: `POST /technicians/me/photo`
+- **Access**: `TECHNICIAN`
+- **Content-Type**: `multipart/form-data`
+- **Body**: `file`: image file (JPEG / PNG / WebP)
+- **Response `200 OK`**:
+```json
+{
+  "success": true,
+  "avatarUrl": "https://res.cloudinary.com/elite-vac/image/upload/v1234/technicians/tech-1.jpg"
+}
+```
+
+#### 4. Remove Photo
+- **Endpoint**: `DELETE /technicians/me/photo`
+- **Access**: `TECHNICIAN`
+- **Response `200 OK`**:
+```json
+{
+  "success": true,
+  "message": "Technician photo removed successfully"
+}
+```
+
+---
+
+### 17.5 Screen 5: Real-Time Availability & Settings
+- **Endpoint**: `PATCH /technicians/me/availability`
+- **Access**: `TECHNICIAN`
+- **Body**:
+```json
+{
+  "availability": "AVAILABLE",
+  "timezone": "America/New_York"
+}
+```
+> **Supported Availability Modes**: `AVAILABLE` | `BUSY` | `ON_BREAK` | `OFF_DUTY`
+
+- **Response `200 OK`**:
+```json
+{
+  "id": "uuid-tech-1",
+  "availability": "AVAILABLE",
+  "timezone": "America/New_York",
+  "updatedAt": "2026-08-31T18:00:00.000Z"
+}
+```
+
+---
+
+### 17.6 Field Execution Flow (Technician on Site)
+
+```mermaid
+graph LR
+    A["ON_THE_WAY"] -->|Send ETA| B["POST /service-orders/:id/eta"]
+    A -->|Arrived| C["ARRIVED"]
+    C -->|Start Job| D["IN_PROGRESS"]
+    D -->|Submit Report| E["POST /service-orders/:id/reports"]
+    E -->|Finish| F["COMPLETED"]
+```
+
+#### 1. Update Job Status
+- **Endpoint**: `PATCH /service-orders/:id/status`
+- **Access**: `TECHNICIAN`, `ADMIN`
+- **Body**:
+```json
+{
+  "status": "ON_THE_WAY",
+  "note": "En route to client property, ETA 15 mins"
+}
+```
+*(Valid transitions: `SCHEDULED` $\rightarrow$ `ON_THE_WAY` $\rightarrow$ `ARRIVED` $\rightarrow$ `IN_PROGRESS` $\rightarrow$ `COMPLETED`)*
+
+#### 2. Send Live ETA Update
+- **Endpoint**: `POST /service-orders/:id/eta`
+- **Access**: `TECHNICIAN`
+- **Body**:
+```json
+{
+  "minutes": 15,
+  "note": "Light traffic on expressway"
+}
+```
+
+#### 3. Submit Field Diagnostic & Completion Report
+- **Endpoint**: `POST /service-orders/:id/reports`
+- **Access**: `TECHNICIAN`
+- **Body**:
+```json
+{
+  "diagnosisFindings": "Heavy paper towel obstruction lodged at 2nd floor junction elbow.",
+  "workPerformed": "Used high-pressure reverse air snake to clear blockage. Tested all 6 wall inlets for airtight vacuum seal.",
+  "technicianNotes": "System is now operating at peak 135 CFM suction.",
+  "recommendations": "Advised customer to replace carbon motor brushes in 6 months.",
+  "partsUsed": [
+    { "partName": "2-Inch Vacuum Coupling", "quantity": 1, "costUsd": 12.50 }
+  ]
+}
+```
+
+---
+
 ## 🎯 Summary Checklist for Frontend Teams
 
 | Step | Feature Domain | Status | Key Component to Build |
@@ -1098,4 +1423,6 @@ chatSocket.on('connect', () => {
 | **Phase 14** | AI & Settings | Ready | Floating AI Support Chatbot & Policy Pages |
 | **Phase 15** | CSV Reports & Export | Ready | One-Click CSV Export Action Buttons in Admin Panel |
 | **Phase 16** | Live Support Chat | Ready | Floating Customer Chat Drawer & Admin Live Inbox |
+| **Phase 17** | Technician Field Portal | Ready | 5-Screen Mobile-Responsive Field App & Status Transitions |
+
 

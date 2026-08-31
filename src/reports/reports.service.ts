@@ -44,9 +44,9 @@ export class ReportsService {
     return { from, to };
   }
 
-  // ==========================================
+
   // OVERVIEW DASHBOARD METRICS
-  // ==========================================
+
 
   async getOverview(query: ReportsQueryDto) {
     const cacheKey = this.getCacheKey('overview', query);
@@ -173,9 +173,9 @@ export class ReportsService {
     return result;
   }
 
-  // ==========================================
+
   // SALES REPORTS
-  // ==========================================
+
 
   async getSales(query: ReportsQueryDto) {
     const cacheKey = this.getCacheKey('sales', query);
@@ -231,9 +231,9 @@ export class ReportsService {
     return result;
   }
 
-  // ==========================================
+
   // SERVICE OPERATIONS REPORTS
-  // ==========================================
+
 
   async getServiceOperations(query: ReportsQueryDto) {
     const cacheKey = this.getCacheKey('services', query);
@@ -266,9 +266,9 @@ export class ReportsService {
     return result;
   }
 
-  // ==========================================
+
   // TECHNICIAN LEADERBOARD
-  // ==========================================
+
 
   async getTechnicians() {
     const cacheKey = 'reports:technicians:leaderboard';
@@ -307,9 +307,9 @@ export class ReportsService {
     return result;
   }
 
-  // ==========================================
+
   // CUSTOMER GROWTH REPORTS
-  // ==========================================
+
 
   async getCustomers() {
     const cacheKey = 'reports:customers:growth';
@@ -339,9 +339,9 @@ export class ReportsService {
     return result;
   }
 
-  // ==========================================
+
   // CSV DATA EXPORT METHODS
-  // ==========================================
+
 
   private formatCsvRow(values: (string | number | boolean | null | undefined)[]): string {
     return values

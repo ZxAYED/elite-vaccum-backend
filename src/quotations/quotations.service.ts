@@ -115,9 +115,9 @@ export class QuotationsService {
     } satisfies Prisma.QuotationInclude;
   }
 
-  // ==========================================
+
   // CREATE QUOTATION
-  // ==========================================
+
 
   async create(dto: CreateQuotationDto, user: RequestUser) {
     const serviceRequest = await this.prisma.serviceRequest.findUnique({
@@ -231,9 +231,9 @@ export class QuotationsService {
     });
   }
 
-  // ==========================================
+
   // LIST QUOTATIONS
-  // ==========================================
+
 
   async findAll(query: QuotationListQueryDto) {
     const where: Prisma.QuotationWhereInput = {
@@ -342,9 +342,9 @@ export class QuotationsService {
     return quotation;
   }
 
-  // ==========================================
+
   // UPDATE / REVISE QUOTATION
-  // ==========================================
+
 
   async update(id: string, dto: UpdateQuotationDto, user: RequestUser) {
     const existing = await this.prisma.quotation.findUnique({
@@ -431,9 +431,9 @@ export class QuotationsService {
     });
   }
 
-  // ==========================================
+
   // ACCEPT / REJECT / STATUS
-  // ==========================================
+
 
   async accept(id: string, user: RequestUser) {
     if (!user) {
@@ -658,9 +658,9 @@ export class QuotationsService {
     }
   }
 
-  // ==========================================
+
   // UNIFIED STATUS / DECISION ENDPOINT
-  // ==========================================
+
 
   async updateStatus(
     id: string,

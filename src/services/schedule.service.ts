@@ -88,9 +88,9 @@ export class ScheduleService {
     } satisfies Prisma.AppointmentInclude;
   }
 
-  // ==========================================
+
   // AVAILABLE SLOTS CALCULATION
-  // ==========================================
+
 
   /**
    * Returns daily booking slots for a given date with explicit FREE vs BOOKED status on every slot.
@@ -178,9 +178,9 @@ export class ScheduleService {
     return result;
   }
 
-  // ==========================================
+
   // ADMIN DISPATCH BOARD
-  // ==========================================
+
 
   async getDispatchBoard(query: ScheduleBoardQueryDto) {
     const [startYear, startMonth, startDay] = query.dateFrom.split('-').map(Number);
@@ -240,9 +240,9 @@ export class ScheduleService {
     };
   }
 
-  // ==========================================
+
   // APPOINTMENT CREATION & DISPATCH
-  // ==========================================
+
 
   async createAppointment(dto: CreateScheduleDto, user: RequestUser) {
     let serviceRequestId = dto.serviceRequestId;
@@ -584,9 +584,9 @@ export class ScheduleService {
     };
   }
 
-  // ==========================================
+
   // CACHE INVALIDATION HELPER
-  // ==========================================
+
 
   async invalidateSlotCache(dateStr?: string) {
     try {

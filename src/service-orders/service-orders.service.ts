@@ -125,9 +125,9 @@ export class ServiceOrdersService {
     } satisfies Prisma.ServiceOrderInclude;
   }
 
-  // ==========================================
+
   // CREATE SERVICE ORDER
-  // ==========================================
+
 
   async create(dto: CreateServiceOrderDto, user: RequestUser) {
     const serviceRequest = await this.prisma.serviceRequest.findUnique({
@@ -224,9 +224,9 @@ export class ServiceOrdersService {
     });
   }
 
-  // ==========================================
+
   // LIST SERVICE ORDERS
-  // ==========================================
+
 
   async findAll(query: ServiceOrderListQueryDto) {
     const where: Prisma.ServiceOrderWhereInput = {
@@ -330,9 +330,9 @@ export class ServiceOrdersService {
     return serviceOrder;
   }
 
-  // ==========================================
+
   // UPDATE / ACTIONS
-  // ==========================================
+
 
   async update(id: string, dto: UpdateServiceOrderDto, user: RequestUser) {
     const existing = await this.prisma.serviceOrder.findUnique({ where: { id } });

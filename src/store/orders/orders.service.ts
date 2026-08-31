@@ -150,9 +150,9 @@ export class StoreOrdersService {
     } satisfies Prisma.ProductOrderInclude;
   }
 
-  // ==========================================
+
   // ORDER CREATION & STRIPE / COD CHECKOUT
-  // ==========================================
+
 
   async createOrderFromCart(dto: CreateOrderDto, user: RequestUser) {
     if (!user || !user.id) {
@@ -830,9 +830,9 @@ export class StoreOrdersService {
     }
   }
 
-  // ==========================================
+
   // ORDER QUERIES & ADMIN CONTROLS
-  // ==========================================
+
 
   async getMyOrders(query: OrderListQueryDto, user: RequestUser) {
     const customerId = await this.resolveCustomerId(user.id);

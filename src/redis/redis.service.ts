@@ -60,9 +60,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // ==========================================
+
   // BASIC KEY-VALUE & JSON OPERATIONS
-  // ==========================================
+
 
   /**
    * Get parsed JSON or string value by key.
@@ -225,9 +225,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return this.client.decr(key);
   }
 
-  // ==========================================
+
   // HASH OPERATIONS
-  // ==========================================
+
 
   async hget<T>(hash: string, field: string): Promise<T | null> {
     try {
@@ -315,9 +315,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // ==========================================
+
   // SETS OPERATIONS
-  // ==========================================
+
 
   async sadd(key: string, ...members: string[]): Promise<number> {
     if (members.length === 0) return 0;
@@ -367,9 +367,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // ==========================================
+
   // SORTED SETS (ZSET)
-  // ==========================================
+
 
   async zadd(key: string, score: number, member: string): Promise<number> {
     try {
@@ -408,9 +408,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // ==========================================
+
   // DISTRIBUTED LOCKS PRIMITIVE
-  // ==========================================
+
 
   /**
    * Acquires a distributed lock using Redis `SET key value NX PX ttlMs`.

@@ -57,9 +57,9 @@ export class ReviewsService {
     } satisfies Prisma.CustomerReviewInclude;
   }
 
-  // ==========================================
+
   // CUSTOMER: SUBMIT REVIEW
-  // ==========================================
+
 
   async create(dto: CreateReviewDto, user: RequestUser) {
     const customer = await this.prisma.customer.findUnique({
@@ -139,9 +139,9 @@ export class ReviewsService {
     };
   }
 
-  // ==========================================
+
   // PUBLIC: LIST PUBLISHED REVIEWS
-  // ==========================================
+
 
   async findAllPublic(query: ReviewListQueryDto) {
     const where: Prisma.CustomerReviewWhereInput = {
@@ -182,9 +182,9 @@ export class ReviewsService {
     };
   }
 
-  // ==========================================
+
   // CUSTOMER: LIST OWN REVIEWS
-  // ==========================================
+
 
   async getMyReviews(query: ReviewListQueryDto, user: RequestUser) {
     const customer = await this.prisma.customer.findUnique({
@@ -215,9 +215,9 @@ export class ReviewsService {
     return { items, meta };
   }
 
-  // ==========================================
+
   // ADMIN: MODERATION
-  // ==========================================
+
 
   async findAllAdmin(query: ReviewListQueryDto) {
     const where: Prisma.CustomerReviewWhereInput = {

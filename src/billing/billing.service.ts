@@ -101,9 +101,9 @@ export class BillingService {
     } satisfies Prisma.InvoiceInclude;
   }
 
-  // ==========================================
+
   // CREATE INVOICE
-  // ==========================================
+
 
   async create(dto: CreateInvoiceDto, user: RequestUser) {
     const customer = await this.prisma.customer.findUnique({
@@ -186,9 +186,9 @@ export class BillingService {
     };
   }
 
-  // ==========================================
+
   // LIST INVOICES
-  // ==========================================
+
 
   async findAll(query: InvoiceListQueryDto) {
     const where: Prisma.InvoiceWhereInput = {
@@ -297,9 +297,9 @@ export class BillingService {
     return invoice;
   }
 
-  // ==========================================
+
   // UPDATE INVOICE
-  // ==========================================
+
 
   async update(id: string, dto: UpdateInvoiceDto, user: RequestUser) {
     const existing = await this.prisma.invoice.findUnique({
@@ -361,9 +361,9 @@ export class BillingService {
     });
   }
 
-  // ==========================================
+
   // PAYMENTS & REFUNDS
-  // ==========================================
+
 
   async recordPayment(id: string, dto: RecordPaymentDto, user: RequestUser) {
     const lockKey = `billing:invoice:${id}`;
@@ -633,9 +633,9 @@ export class BillingService {
     return html;
   }
 
-  // ==========================================
+
   // ONLINE STRIPE INVOICE PAYMENTS
-  // ==========================================
+
 
   async createStripePaymentIntent(id: string, user: RequestUser) {
     const invoice = await this.findOne(id, user);

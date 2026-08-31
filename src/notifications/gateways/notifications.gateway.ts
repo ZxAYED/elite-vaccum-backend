@@ -170,9 +170,9 @@ export class NotificationsGateway
     return null;
   }
 
-  // ==========================================
+
   // PUBSUB DISPATCHER & BROADCAST HELPERS
-  // ==========================================
+
 
   /**
    * Internal listener: Receives cross-instance notification events from Redis PubSub and emits to local sockets.
@@ -245,9 +245,9 @@ export class NotificationsGateway
     return this.presenceService.isUserOnline(userId);
   }
 
-  // ==========================================
+
   // CLIENT SUBSCRIPTION MESSAGES
-  // ==========================================
+
 
   @SubscribeMessage('notifications:ping')
   async handlePing(client: AuthenticatedSocket) {

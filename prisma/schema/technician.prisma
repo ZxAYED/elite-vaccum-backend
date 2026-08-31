@@ -13,6 +13,9 @@ model Technician {
   completedJobs       Int              @default(0) @map("completed_jobs")
   isVerified          Boolean          @default(true) @map("is_verified")
   specializations     String[]         @default([])
+  avatarUrl           String?          @map("avatar_url") @db.VarChar(500)
+  availability        String           @default("AVAILABLE") @db.VarChar(50)
+  timezone            String           @default("America/New_York") @db.VarChar(100)
   defaultAvailability Json?            @map("default_availability")
   adminNotes          String?          @map("admin_notes") @db.Text
   createdAt           DateTime         @default(now()) @map("created_at") @db.Timestamptz

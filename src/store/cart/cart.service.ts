@@ -157,9 +157,9 @@ export class StoreCartService {
     };
   }
 
-  // ==========================================
+
   // CART ACTIONS (CUSTOMER ONLY)
-  // ==========================================
+
 
   async addCartItem(dto: AddCartItemDto, user: RequestUser) {
     const product = await this.prisma.product.findUnique({

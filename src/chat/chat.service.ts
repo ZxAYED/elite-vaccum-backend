@@ -42,9 +42,9 @@ export class ChatService {
     return user?.role === UserRole.ADMIN;
   }
 
-  // ==========================================
+
   // CONVERSATIONS
-  // ==========================================
+
 
   async getOrCreateConversation(
     dto: CreateConversationDto,
@@ -287,9 +287,9 @@ export class ChatService {
     return conversation;
   }
 
-  // ==========================================
+
   // MESSAGES
-  // ==========================================
+
 
   async getConversationMessages(
     conversationId: string,

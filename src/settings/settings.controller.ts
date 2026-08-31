@@ -26,9 +26,9 @@ import { SettingsService } from './settings.service';
 export class SettingsController {
   constructor(private readonly settingsService: SettingsService) {}
 
-  // ==========================================
+
   // BUSINESS PROFILE
-  // ==========================================
+
 
   @Get('business-profile')
   @Public()
@@ -47,9 +47,9 @@ export class SettingsController {
     return this.settingsService.updateBusinessProfile(dto);
   }
 
-  // ==========================================
+
   // FAQS MANAGEMENT
-  // ==========================================
+
 
   @Get('faqs')
   @Public()
@@ -91,9 +91,9 @@ export class SettingsController {
     return this.settingsService.deleteFaq(id);
   }
 
-  // ==========================================
+
   // LEGAL & POLICIES MANAGEMENT
-  // ==========================================
+
 
   @Get('policies')
   @Public()

@@ -11,9 +11,9 @@ async function main() {
   const saltRounds = 10;
   const passwordHash = await bcrypt.hash(defaultPassword, saltRounds);
 
-  // ==========================================
+
   // 1. SEED ADMIN USER
-  // ==========================================
+
   const adminEmail = (process.env.ADMIN_EMAIL || 'admin@elitecentralvac.com').toLowerCase();
   const admin = await prisma.user.upsert({
     where: { email: adminEmail },
@@ -38,9 +38,9 @@ async function main() {
   });
   console.log(`✅ Seeded Admin: ${admin.email} (Role: ${admin.role})`);
 
-  // ==========================================
+
   // 2. SEED CUSTOMER USER
-  // ==========================================
+
   const customerEmail = (process.env.CUSTOMER_EMAIL || 'customer@elitecentralvac.com').toLowerCase();
   const customerUser = await prisma.user.upsert({
     where: { email: customerEmail },
@@ -86,9 +86,9 @@ async function main() {
   });
   console.log(`✅ Seeded Customer: ${customerUser.email} (Role: ${customerUser.role})`);
 
-  // ==========================================
+
   // 3. SEED TECHNICIAN USER
-  // ==========================================
+
   const techEmail = (process.env.TECH_EMAIL || 'technician@elitecentralvac.com').toLowerCase();
   const techUser = await prisma.user.upsert({
     where: { email: techEmail },

@@ -16,9 +16,9 @@ export class SettingsService implements OnModuleInit {
     await this.ensureDefaultsSeeded();
   }
 
-  // ==========================================
+
   // BUSINESS PROFILE & CONTACT
-  // ==========================================
+
 
   async getBusinessProfile() {
     let profile = await this.prisma.businessProfile.findFirst();
@@ -102,9 +102,9 @@ export class SettingsService implements OnModuleInit {
     };
   }
 
-  // ==========================================
+
   // FAQS MANAGEMENT
-  // ==========================================
+
 
   async getFaqs(category?: string, status?: string) {
     const where: any = {};
@@ -182,9 +182,9 @@ export class SettingsService implements OnModuleInit {
     };
   }
 
-  // ==========================================
+
   // LEGAL & POLICIES MANAGEMENT
-  // ==========================================
+
 
   async getPolicies() {
     const policies = await this.prisma.legalPolicy.findMany({
@@ -271,9 +271,9 @@ export class SettingsService implements OnModuleInit {
     };
   }
 
-  // ==========================================
+
   // DEFAULTS SEEDER
-  // ==========================================
+
 
   private async ensureDefaultsSeeded() {
     try {

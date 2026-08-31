@@ -29,9 +29,9 @@ export const SYMPTOM_DEFINITIONS: {
 ];
 
 export const FIXED_SERVICES_CATALOG: FixedServiceOffering[] = [
-  // ==========================================
+
   // GROUP 1: SERVICE_AND_MAINTENANCE
-  // ==========================================
+
   {
     key: 'VACUUM_REPAIR',
     slug: 'vacuum-repair',
@@ -132,9 +132,9 @@ export const FIXED_SERVICES_CATALOG: FixedServiceOffering[] = [
     recommendedSymptoms: [RequestSymptom.OTHER],
   },
 
-  // ==========================================
+
   // GROUP 2: INSTALLATION
-  // ==========================================
+
   {
     key: 'NEW_SYSTEM',
     slug: 'new-system',
