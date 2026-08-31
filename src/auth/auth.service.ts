@@ -649,20 +649,29 @@ export class AuthService {
     const newAccessToken = await this.signAccessToken(user);
     const newRefreshToken = await this.signRefreshToken(user);
 
-    // Rotate session in database
-    await this.prisma.$transaction([
-      this.prisma.userSession.updateMany({
-        where: { refreshToken: params.refreshToken, revokedAt: null },
-        data: { revokedAt: new Date() },
-      }),
-      this.prisma.userSession.create({
+    // Rotate session in database atomically with race condition defense
+    await this.prisma.$transaction(async (tx) => {
+      if (session) {
+        const updateResult = await tx.userSession.updateMany({
+          where: { refreshToken: params.refreshToken, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+
+        if (updateResult.count === 0) {
+          throw new UnauthorizedException(
+            'This refresh token has already been consumed.',
+          );
+        }
+      }
+
+      await tx.userSession.create({
         data: {
           userId: user.id,
           refreshToken: newRefreshToken,
           expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         },
-      }),
-    ]);
+      });
+    });
 
     return {
       user: this.toPublicUser(user),

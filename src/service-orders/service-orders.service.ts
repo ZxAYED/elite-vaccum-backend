@@ -416,6 +416,29 @@ export class ServiceOrdersService {
         });
       }
 
+      // Synchronize linked appointment status
+      if (dto.status === ServiceOrderStatus.COMPLETED) {
+        await tx.appointment.updateMany({
+          where: {
+            OR: [
+              { serviceOrderId: order.id },
+              { serviceRequestId: order.serviceRequestId },
+            ],
+          },
+          data: { status: 'COMPLETED' },
+        });
+      } else if (dto.status === ServiceOrderStatus.CANCELLED) {
+        await tx.appointment.updateMany({
+          where: {
+            OR: [
+              { serviceOrderId: order.id },
+              { serviceRequestId: order.serviceRequestId },
+            ],
+          },
+          data: { status: 'CANCELLED' },
+        });
+      }
+
       // Real-Time Notification on Status Change
       if (updated.customer?.userId) {
         let statusTitle = `Service Order ${updated.businessId} Update`;

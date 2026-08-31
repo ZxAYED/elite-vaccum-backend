@@ -449,6 +449,11 @@ export class StoreOrdersService {
           where: { cartId: cart.id },
         });
 
+        await tx.cart.update({
+          where: { id: cart.id },
+          data: { subtotalUsd: new Prisma.Decimal(0) },
+        });
+
         return createdOrder;
       });
 

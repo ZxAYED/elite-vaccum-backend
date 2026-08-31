@@ -20,6 +20,7 @@ import { EmailService } from 'src/email/email.service';
 import { EmailTemplateKey } from 'src/email/types/email.types';
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { RedisService } from 'src/redis';
 import { CreateQuotationDto } from './dto/create-quotation.dto';
 import {
   QuotationDecisionAction,
@@ -37,6 +38,7 @@ export class QuotationsService {
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
     private readonly notificationsService: NotificationsService,
+    private readonly redis: RedisService,
   ) {}
 
   private isAdmin(user?: RequestUser | null) {
@@ -442,108 +444,125 @@ export class QuotationsService {
       throw new ForbiddenException('Admin cannot accept quotations. Only the customer can accept this quotation.');
     }
 
-    const quotation = await this.prisma.quotation.findUnique({
-      where: { id },
-      include: { serviceRequest: true, customer: true, lineItems: true },
+    const lockKey = `quotation:action:${id}`;
+    const lockToken = await this.redis.acquireLock(lockKey, {
+      ttlMs: 15000,
+      retryCount: 1,
+      retryDelayMs: 300,
     });
 
-    if (!quotation) throw new NotFoundException('Quotation not found');
-
-    if (
-      quotation.customer.userId !== user.id &&
-      quotation.customer.email.toLowerCase() !== user.email?.toLowerCase()
-    ) {
-      throw new ForbiddenException('You do not have permission to accept this quotation');
+    if (!lockToken) {
+      throw new BadRequestException(
+        'A status update is currently in progress for this quotation. Please wait a moment.',
+      );
     }
 
-    if (quotation.status === QuotationStatus.ACCEPTED) {
-      throw new BadRequestException('Quotation has already been accepted');
-    }
-
-    const serviceOrderBusinessId = await this.generateServiceOrderBusinessId();
-
-    return this.prisma.$transaction(async (tx) => {
-      // 1. Mark Quotation Accepted
-      const updatedQuotation = await tx.quotation.update({
+    try {
+      const quotation = await this.prisma.quotation.findUnique({
         where: { id },
-        data: {
-          status: QuotationStatus.ACCEPTED,
-          acceptedAt: new Date(),
-        },
+        include: { serviceRequest: true, customer: true, lineItems: true },
       });
 
-      // 2. Auto-Provision Service Order linked to Quotation
-      const scheduledAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // Defaults next day
-      const serviceOrder = await tx.serviceOrder.create({
-        data: {
-          businessId: serviceOrderBusinessId,
-          serviceRequestId: quotation.serviceRequestId,
-          quotationId: quotation.id,
-          customerId: quotation.customerId,
-          status: ServiceOrderStatus.SCHEDULED,
-          scheduledAt,
-          estimatedDurationMin: 90,
-          totalUsd: quotation.totalUsd,
-          summary: `Service Order for ${quotation.serviceRequest.title}`,
-          customerNotes: quotation.serviceRequest.description,
-          adminInstructions: quotation.notes || 'Proceed with approved quotation items',
-        },
-      });
+      if (!quotation) throw new NotFoundException('Quotation not found');
 
-      // 3. Link Service Order back to Quotation
-      await tx.quotation.update({
-        where: { id },
-        data: { serviceOrderId: serviceOrder.id },
-      });
+      if (
+        quotation.customer.userId !== user.id &&
+        quotation.customer.email.toLowerCase() !== user.email?.toLowerCase()
+      ) {
+        throw new ForbiddenException('You do not have permission to accept this quotation');
+      }
 
-      // 4. Update Service Request status
-      await tx.serviceRequest.update({
-        where: { id: quotation.serviceRequestId },
-        data: { status: ServiceRequestStatus.ACCEPTED },
-      });
+      if (quotation.status === QuotationStatus.ACCEPTED) {
+        throw new BadRequestException('Quotation has already been accepted');
+      }
 
-      // 5. Record initial status history
-      await tx.serviceOrderStatusHistory.create({
-        data: {
-          serviceOrderId: serviceOrder.id,
-          fromStatus: ServiceOrderStatus.SCHEDULED,
-          toStatus: ServiceOrderStatus.SCHEDULED,
-          note: `Service Order automatically created upon acceptance of Quotation ${quotation.businessId}`,
-          actorLabel: `Customer (${user.email})`,
-        },
-      });
+      const serviceOrderBusinessId = await this.generateServiceOrderBusinessId();
 
-      const fullQuotation = await tx.quotation.findUnique({
-        where: { id },
-        include: this.quotationInclude(),
-      });
-
-      // Dispatch Admin Real-Time Notification
-      this.notificationsService
-        .notifyAdmins({
-          type: NotificationType.QUOTATION_UPDATE,
-          title: `Quotation ${quotation.businessId} Accepted`,
-          message: `Customer ${quotation.customer.displayName || quotation.customer.email} accepted Quotation ${quotation.businessId} ($${Number(quotation.totalUsd).toFixed(2)}). Service Order ${serviceOrder.businessId} created.`,
-          ctaLabel: 'View Service Order',
-          ctaUrl: `/admin/service-orders/${serviceOrder.id}`,
-          metadata: {
-            quotationId: quotation.id,
-            serviceOrderId: serviceOrder.id,
-            totalUsd: quotation.totalUsd,
+      return await this.prisma.$transaction(async (tx) => {
+        // 1. Mark Quotation Accepted
+        const updatedQuotation = await tx.quotation.update({
+          where: { id },
+          data: {
+            status: QuotationStatus.ACCEPTED,
+            acceptedAt: new Date(),
           },
-          priority: 1,
-        })
-        .catch((err) => {
-          this.logger.warn(`Failed to notify admins of quotation acceptance: ${err.message}`);
         });
 
-      return {
-        success: true,
-        message: 'Quotation accepted and Service Order generated successfully',
-        quotation: fullQuotation,
-        serviceOrder,
-      };
-    });
+        // 2. Auto-Provision Service Order linked to Quotation
+        const scheduledAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // Defaults next day
+        const serviceOrder = await tx.serviceOrder.create({
+          data: {
+            businessId: serviceOrderBusinessId,
+            serviceRequestId: quotation.serviceRequestId,
+            quotationId: quotation.id,
+            customerId: quotation.customerId,
+            status: ServiceOrderStatus.SCHEDULED,
+            scheduledAt,
+            estimatedDurationMin: 90,
+            totalUsd: quotation.totalUsd,
+            summary: `Service Order for ${quotation.serviceRequest.title}`,
+            customerNotes: quotation.serviceRequest.description,
+            adminInstructions: quotation.notes || 'Proceed with approved quotation items',
+          },
+        });
+
+        // 3. Link Service Order back to Quotation
+        await tx.quotation.update({
+          where: { id },
+          data: { serviceOrderId: serviceOrder.id },
+        });
+
+        // 4. Update Service Request status
+        await tx.serviceRequest.update({
+          where: { id: quotation.serviceRequestId },
+          data: { status: ServiceRequestStatus.ACCEPTED },
+        });
+
+        // 5. Record initial status history
+        await tx.serviceOrderStatusHistory.create({
+          data: {
+            serviceOrderId: serviceOrder.id,
+            fromStatus: ServiceOrderStatus.SCHEDULED,
+            toStatus: ServiceOrderStatus.SCHEDULED,
+            note: `Service Order automatically created upon acceptance of Quotation ${quotation.businessId}`,
+            actorLabel: `Customer (${user.email})`,
+          },
+        });
+
+        const fullQuotation = await tx.quotation.findUnique({
+          where: { id },
+          include: this.quotationInclude(),
+        });
+
+        // Dispatch Admin Real-Time Notification
+        this.notificationsService
+          .notifyAdmins({
+            type: NotificationType.QUOTATION_UPDATE,
+            title: `Quotation ${quotation.businessId} Accepted`,
+            message: `Customer ${quotation.customer.displayName || quotation.customer.email} accepted Quotation ${quotation.businessId} ($${Number(quotation.totalUsd).toFixed(2)}). Service Order ${serviceOrder.businessId} created.`,
+            ctaLabel: 'View Service Order',
+            ctaUrl: `/admin/service-orders/${serviceOrder.id}`,
+            metadata: {
+              quotationId: quotation.id,
+              serviceOrderId: serviceOrder.id,
+              totalUsd: quotation.totalUsd,
+            },
+            priority: 1,
+          })
+          .catch((err) => {
+            this.logger.warn(`Failed to notify admins of quotation acceptance: ${err.message}`);
+          });
+
+        return {
+          success: true,
+          message: 'Quotation accepted and Service Order generated successfully',
+          quotation: fullQuotation,
+          serviceOrder,
+        };
+      });
+    } finally {
+      await this.redis.releaseLock(lockKey, lockToken);
+    }
   }
 
   async reject(id: string, dto: RejectQuotationDto, user: RequestUser) {
@@ -555,71 +574,88 @@ export class QuotationsService {
       throw new ForbiddenException('Admin cannot reject quotations. Only the customer can reject this quotation.');
     }
 
-    const quotation = await this.prisma.quotation.findUnique({
-      where: { id },
-      include: { customer: true },
+    const lockKey = `quotation:action:${id}`;
+    const lockToken = await this.redis.acquireLock(lockKey, {
+      ttlMs: 15000,
+      retryCount: 1,
+      retryDelayMs: 300,
     });
 
-    if (!quotation) throw new NotFoundException('Quotation not found');
-
-    if (
-      quotation.customer.userId !== user.id &&
-      quotation.customer.email.toLowerCase() !== user.email?.toLowerCase()
-    ) {
-      throw new ForbiddenException('You do not have permission to reject this quotation');
+    if (!lockToken) {
+      throw new BadRequestException(
+        'A status update is currently in progress for this quotation.',
+      );
     }
 
-    if (quotation.status === QuotationStatus.ACCEPTED) {
-      throw new BadRequestException('Cannot reject an already accepted quotation');
-    }
-
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.quotation.update({
+    try {
+      const quotation = await this.prisma.quotation.findUnique({
         where: { id },
-        data: {
-          status: QuotationStatus.REJECTED,
-          rejectedAt: new Date(),
-        },
+        include: { customer: true },
       });
 
-      await tx.quotationRejection.create({
-        data: {
-          quotationId: id,
-          reason: dto.reason.trim(),
-          comments: dto.comments?.trim() || null,
-          actorLabel: `Customer (${user.email})`,
-        },
-      });
+      if (!quotation) throw new NotFoundException('Quotation not found');
 
-      const fullQuotation = await tx.quotation.findUnique({
-        where: { id },
-        include: this.quotationInclude(),
-      });
+      if (
+        quotation.customer.userId !== user.id &&
+        quotation.customer.email.toLowerCase() !== user.email?.toLowerCase()
+      ) {
+        throw new ForbiddenException('You do not have permission to reject this quotation');
+      }
 
-      // Dispatch Admin Real-Time Notification
-      this.notificationsService
-        .notifyAdmins({
-          type: NotificationType.QUOTATION_UPDATE,
-          title: `Quotation ${quotation.businessId} Rejected`,
-          message: `Customer rejected Quotation ${quotation.businessId}. Reason: "${dto.reason || 'No reason specified'}".`,
-          ctaLabel: 'View Quotation',
-          ctaUrl: `/admin/quotations/${quotation.id}`,
-          metadata: {
-            quotationId: quotation.id,
-            reason: dto.reason,
+      if (quotation.status === QuotationStatus.ACCEPTED) {
+        throw new BadRequestException('Cannot reject an already accepted quotation');
+      }
+
+      return await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.quotation.update({
+          where: { id },
+          data: {
+            status: QuotationStatus.REJECTED,
+            rejectedAt: new Date(),
           },
-          priority: 2,
-        })
-        .catch((err) => {
-          this.logger.warn(`Failed to notify admins of quotation rejection: ${err.message}`);
         });
 
-      return {
-        success: true,
-        message: 'Quotation rejected successfully',
-        quotation: fullQuotation,
-      };
-    });
+        await tx.quotationRejection.create({
+          data: {
+            quotationId: id,
+            reason: dto.reason.trim(),
+            comments: dto.comments?.trim() || null,
+            actorLabel: `Customer (${user.email})`,
+          },
+        });
+
+        const fullQuotation = await tx.quotation.findUnique({
+          where: { id },
+          include: this.quotationInclude(),
+        });
+
+        // Dispatch Admin Real-Time Notification
+        this.notificationsService
+          .notifyAdmins({
+            type: NotificationType.QUOTATION_UPDATE,
+            title: `Quotation ${quotation.businessId} Rejected`,
+            message: `Customer ${quotation.customer.displayName || quotation.customer.email} rejected Quotation ${quotation.businessId}. Reason: ${dto.reason}`,
+            ctaLabel: 'View Quotation',
+            ctaUrl: `/admin/quotations/${id}`,
+            metadata: {
+              quotationId: id,
+              reason: dto.reason,
+            },
+            priority: 2,
+          })
+          .catch((err) => {
+            this.logger.warn(`Failed to notify admins of quotation rejection: ${err.message}`);
+          });
+
+        return {
+          success: true,
+          message: 'Quotation rejected successfully',
+          quotation: fullQuotation,
+        };
+      });
+    } finally {
+      await this.redis.releaseLock(lockKey, lockToken);
+    }
   }
 
   // ==========================================
