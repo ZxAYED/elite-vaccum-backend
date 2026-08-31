@@ -24,6 +24,8 @@ model User {
   notificationPreference NotificationPreference?
   auditLogs              AuditLog[]
   internalNotesAuthored  CustomerInternalNote[]  @relation("NoteAuthor")
+  chatParticipants       ChatParticipant[]
+  chatMessages           ChatMessage[]
 
   @@index([role, isActive])
   @@map("users")

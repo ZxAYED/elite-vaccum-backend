@@ -123,6 +123,7 @@ src/
 ├── analytics/              # Platform KPI aggregations and dashboard statistics
 ├── auth/                   # JWT, OTP verification, bcrypt hashing, session guards
 ├── billing/                # Multi-item invoices, payment transactions, Stripe integration
+├── chat/                   # Live Real-Time Chat (Socket.io, Redis PubSub, BullMQ offline alerts)
 ├── common/                 # Decorators, filters, guards, interceptors, and DTOs
 ├── customers/              # Customer CRM profiles, addresses, equipment, and notes
 ├── email/                  # Nodemailer SMTP engine and HTML email templates
@@ -134,7 +135,7 @@ src/
 ├── prisma/                 # PrismaService singleton with connection lifecycle
 ├── quotations/             # Quotation drafting, revision history, and accept/reject flows
 ├── redis/                  # RedisModule, RedisService, PubSub, and Presence
-├── reports/                # PDF generation for invoices, service reports, work orders
+├── reports/                # Executive KPI metrics and direct streaming CSV export endpoints
 ├── reviews/                # Customer reviews, ratings, and admin moderation
 ├── service-orders/         # Field execution, technician assignments, live ETAs
 ├── services/               # Service catalog, customer intake requests, scheduling slots

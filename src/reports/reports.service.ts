@@ -338,4 +338,213 @@ export class ReportsService {
     await this.redis.set(cacheKey, result, 60);
     return result;
   }
+
+  // ==========================================
+  // CSV DATA EXPORT METHODS
+  // ==========================================
+
+  private formatCsvRow(values: (string | number | boolean | null | undefined)[]): string {
+    return values
+      .map((val) => {
+        if (val === null || val === undefined) return '""';
+        const str = String(val).replace(/"/g, '""');
+        return `"${str}"`;
+      })
+      .join(',');
+  }
+
+  async exportOrdersCsv(query: ReportsQueryDto): Promise<string> {
+    const { from, to } = this.getDateRange(query);
+
+    const orders = await this.prisma.productOrder.findMany({
+      where: {
+        placedAt: { gte: from, lte: to },
+      },
+      include: {
+        customer: true,
+      },
+      orderBy: { placedAt: 'desc' },
+    });
+
+    const headers = [
+      'Order ID',
+      'Business ID',
+      'Customer Name',
+      'Customer Email',
+      'Status',
+      'Subtotal (USD)',
+      'Shipping (USD)',
+      'Tax (USD)',
+      'Total (USD)',
+      'Carrier',
+      'Tracking Number',
+      'Placed At',
+    ];
+
+    const rows = orders.map((o) =>
+      this.formatCsvRow([
+        o.id,
+        o.businessId,
+        o.customer?.displayName || `${o.customer?.firstName} ${o.customer?.lastName}`,
+        o.customer?.email,
+        o.status,
+        Number(o.subtotalUsd).toFixed(2),
+        Number(o.shippingFeeUsd).toFixed(2),
+        Number(o.taxUsd).toFixed(2),
+        Number(o.totalUsd).toFixed(2),
+        o.shippingProvider || 'N/A',
+        o.trackingNumber || 'N/A',
+        o.placedAt.toISOString(),
+      ]),
+    );
+
+    return [this.formatCsvRow(headers), ...rows].join('\n');
+  }
+
+  async exportServiceRequestsCsv(query: ReportsQueryDto): Promise<string> {
+    const { from, to } = this.getDateRange(query);
+
+    const requests = await this.prisma.serviceRequest.findMany({
+      where: {
+        submittedAt: { gte: from, lte: to },
+      },
+      include: {
+        customer: true,
+        service: true,
+      },
+      orderBy: { submittedAt: 'desc' },
+    });
+
+    const headers = [
+      'Request ID',
+      'Business ID',
+      'Customer Name',
+      'Customer Email',
+      'Service Name',
+      'Status',
+      'Urgency',
+      'Preferred Date',
+      'Preferred Time',
+      'City / State',
+      'Submitted At',
+    ];
+
+    const rows = requests.map((r) =>
+      this.formatCsvRow([
+        r.id,
+        r.businessId,
+        r.customer?.displayName || `${r.customer?.firstName} ${r.customer?.lastName}`,
+        r.customer?.email,
+        r.service?.name || 'General Service',
+        r.status,
+        r.urgency,
+        r.preferredDate || 'N/A',
+        r.preferredTime || 'N/A',
+        r.propertyLabel || 'N/A',
+        r.submittedAt.toISOString(),
+      ]),
+    );
+
+    return [this.formatCsvRow(headers), ...rows].join('\n');
+  }
+
+  async exportCustomersCsv(): Promise<string> {
+    const customers = await this.prisma.customer.findMany({
+      include: {
+        productOrders: { select: { totalUsd: true } },
+        serviceOrders: { select: { totalUsd: true } },
+      },
+      orderBy: { joinedAt: 'desc' },
+    });
+
+    const headers = [
+      'Customer ID',
+      'Display Name',
+      'Email',
+      'Phone',
+      'Cellphone',
+      'Company',
+      'Status',
+      'Product Orders Count',
+      'Service Orders Count',
+      'Total Product Spend (USD)',
+      'Total Service Spend (USD)',
+      'Joined At',
+    ];
+
+    const rows = customers.map((c) => {
+      const productSpend = c.productOrders.reduce(
+        (sum, o) => sum + Number(o.totalUsd),
+        0,
+      );
+      const serviceSpend = c.serviceOrders.reduce(
+        (sum, o) => sum + Number(o.totalUsd),
+        0,
+      );
+
+      return this.formatCsvRow([
+        c.id,
+        c.displayName,
+        c.email,
+        c.phone || '',
+        c.cellphone || '',
+        c.company || '',
+        c.status,
+        c.productOrders.length,
+        c.serviceOrders.length,
+        productSpend.toFixed(2),
+        serviceSpend.toFixed(2),
+        c.joinedAt.toISOString(),
+      ]);
+    });
+
+    return [this.formatCsvRow(headers), ...rows].join('\n');
+  }
+
+  async exportInvoicesCsv(query: ReportsQueryDto): Promise<string> {
+    const { from, to } = this.getDateRange(query);
+
+    const invoices = await this.prisma.invoice.findMany({
+      where: {
+        createdAt: { gte: from, lte: to },
+      },
+      include: {
+        customer: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const headers = [
+      'Invoice ID',
+      'Business ID',
+      'Customer Name',
+      'Customer Email',
+      'Status',
+      'Subtotal (USD)',
+      'Tax (USD)',
+      'Discount (USD)',
+      'Total (USD)',
+      'Due Date',
+      'Created At',
+    ];
+
+    const rows = invoices.map((inv) =>
+      this.formatCsvRow([
+        inv.id,
+        inv.businessId,
+        inv.customer?.displayName || inv.customer?.email,
+        inv.customer?.email,
+        inv.status,
+        Number(inv.subtotalUsd).toFixed(2),
+        Number(inv.taxUsd).toFixed(2),
+        Number(inv.discountUsd).toFixed(2),
+        Number(inv.totalUsd).toFixed(2),
+        inv.dueDate ? inv.dueDate.toISOString() : 'N/A',
+        inv.createdAt.toISOString(),
+      ]),
+    );
+
+    return [this.formatCsvRow(headers), ...rows].join('\n');
+  }
 }
+

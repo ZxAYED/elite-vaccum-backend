@@ -21,6 +21,8 @@ Welcome to the **Elite Central Vacuum** API Integration Guide. This document pro
 - [Phase 12: Invoicing, Payments & Refunds](#phase-12-invoicing-payments--refunds)
 - [Phase 13: Customer Reviews & Ratings](#phase-13-customer-reviews--ratings)
 - [Phase 14: Analytics, System Settings & AI Assistant](#phase-14-analytics-system-settings--ai-assistant)
+- [Phase 15: CSV Data Export & Reporting](#phase-15-csv-data-export--reporting)
+- [Phase 16: Live Real-Time Support Chat & WebSockets](#phase-16-live-real-time-support-chat--websockets)
 
 ---
 
@@ -882,6 +884,200 @@ socket.on('notification:read_all', () => {
 
 ---
 
+## Phase 15: CSV Data Export & Reporting
+
+The backend provides direct streaming CSV download endpoints for administrative reporting. Headers include standard `Content-Disposition: attachment; filename="..."` and `Content-Type: text/csv`.
+
+### 15.1 Export Orders Report (CSV)
+- **Endpoint**: `GET /reports/export/orders/csv`
+- **Access**: `ADMIN`
+- **Query Parameters**:
+  - `period`: `7d` | `30d` | `90d` | `1y`
+  - `from`: `YYYY-MM-DD`
+  - `to`: `YYYY-MM-DD`
+- **Headers Returned**:
+  ```http
+  Content-Type: text/csv
+  Content-Disposition: attachment; filename="orders_report.csv"
+  ```
+- **Example Frontend Trigger (Blob Download)**:
+  ```typescript
+  const downloadOrdersCsv = async () => {
+    const response = await apiClient.get('/reports/export/orders/csv', {
+      responseType: 'blob',
+    });
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'orders_report.csv');
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+  ```
+
+### 15.2 Export Service Requests Report (CSV)
+- **Endpoint**: `GET /reports/export/service-requests/csv`
+- **Access**: `ADMIN`
+- **Columns**: `Request ID, Business ID, Customer Name, Customer Email, Service Name, Status, Urgency, Preferred Date, Preferred Time, City / State, Submitted At`
+
+### 15.3 Export Customers Report (CSV)
+- **Endpoint**: `GET /reports/export/customers/csv`
+- **Access**: `ADMIN`
+- **Columns**: `Customer ID, Display Name, Email, Phone, Cellphone, Company, Status, Product Orders Count, Service Orders Count, Total Product Spend (USD), Total Service Spend (USD), Joined At`
+
+### 15.4 Export Invoices Report (CSV)
+- **Endpoint**: `GET /reports/export/invoices/csv`
+- **Access**: `ADMIN`
+- **Columns**: `Invoice ID, Business ID, Customer Name, Customer Email, Status, Subtotal (USD), Tax (USD), Discount (USD), Total (USD), Due Date, Created At`
+
+---
+
+## Phase 16: Live Real-Time Support Chat & WebSockets
+
+A complete enterprise chat system built with **Socket.io (`/chat` namespace)**, **Redis Pub/Sub** (multi-node broadcast), **Redis Presence** (live online tracking), and **BullMQ delayed queue** (offline email alerts if recipient does not read within 2 minutes).
+
+### 16.1 WebSocket Gateway Architecture (`/chat`)
+
+- **Connection URL**: `ws://localhost:4000/chat` (or `wss://api.yourdomain.com/chat`)
+- **Authentication**: Pass Bearer token via `auth.token` or `extraHeaders.authorization`:
+```typescript
+import { io } from 'socket.io-client';
+
+const chatSocket = io('http://localhost:4000/chat', {
+  auth: {
+    token: localStorage.getItem('accessToken'),
+  },
+  transports: ['websocket'],
+});
+
+chatSocket.on('connect', () => {
+  console.log('Connected to Live Support Chat Gateway');
+});
+```
+
+### 16.2 Real-Time WebSocket Events Table
+
+| Event Name | Direction | Payload Schema | Purpose |
+| :--- | :--- | :--- | :--- |
+| `chat:join_conversation` | Client ➔ Server | `{ "conversationId": "conv-uuid" }` | Subscribe socket to specific chat room |
+| `chat:send_message` | Client ➔ Server | `{ "conversationId": "conv-uuid", "content": "Hello!" }` | Send message in real-time |
+| `chat:typing` | Client ➔ Server | `{ "conversationId": "conv-uuid", "isTyping": true }` | Send live typing indicator |
+| `chat:mark_read` | Client ➔ Server | `{ "conversationId": "conv-uuid" }` | Mark all room messages read |
+| `chat:message_received` | Server ➔ Client | `{ "conversationId": "...", "message": { ... } }` | Instant real-time message received (<10ms) |
+| `chat:typing_update` | Server ➔ Client | `{ "conversationId": "...", "userId": "...", "isTyping": true }` | Show/hide "... is typing" banner |
+| `chat:read_receipt_update` | Server ➔ Client | `{ "conversationId": "...", "userId": "...", "readAt": "..." }` | Update double-check checkmarks |
+
+### 16.3 REST Endpoints (Conversations & Fallbacks)
+
+#### 1. Start / Get Support Conversation
+- **Endpoint**: `POST /chat/conversations`
+- **Access**: `CUSTOMER`, `ADMIN`
+- **Request Body**:
+```json
+{
+  "type": "SUPPORT",
+  "title": "Need help with Central Vacuum Unit",
+  "initialMessage": "Hi! Can a technician check my attic piping?"
+}
+```
+- **Response `201 Created`**:
+```json
+{
+  "id": "c5f3e281-79b8-4c12-8822-10f8ad138d82",
+  "type": "SUPPORT",
+  "title": "Need help with Central Vacuum Unit",
+  "participants": [
+    { "userId": "cust-uuid-1", "roleInChat": "CUSTOMER" },
+    { "userId": "admin-uuid-1", "roleInChat": "ADMIN" }
+  ],
+  "createdAt": "2026-08-31T17:40:00.000Z"
+}
+```
+
+#### 2. List Conversations (with Unread Counts & Online Status)
+- **Endpoint**: `GET /chat/conversations`
+- **Access**: `Authenticated`
+- **Response `200 OK`**:
+```json
+{
+  "items": [
+    {
+      "id": "c5f3e281-79b8-4c12-8822-10f8ad138d82",
+      "type": "SUPPORT",
+      "title": "Need help with Central Vacuum Unit",
+      "unreadCount": 2,
+      "isOtherOnline": true,
+      "lastMessage": {
+        "content": "Our technician can arrive on Wednesday at 10 AM.",
+        "createdAt": "2026-08-31T17:42:00.000Z"
+      }
+    }
+  ],
+  "meta": { "totalItems": 1, "currentPage": 1, "totalPages": 1 }
+}
+```
+
+#### 3. Total Unread Badge Count
+- **Endpoint**: `GET /chat/unread-count`
+- **Access**: `Authenticated`
+- **Response `200 OK`**:
+```json
+{
+  "success": true,
+  "unreadCount": 3
+}
+```
+
+#### 4. Get Conversation Message History
+- **Endpoint**: `GET /chat/conversations/:id/messages`
+- **Access**: `CUSTOMER`, `ADMIN` (Participants only)
+- **Query Parameters**: `?page=1&limit=30&before=ISO_DATE`
+- **Response `200 OK`**:
+```json
+{
+  "items": [
+    {
+      "id": "msg-001",
+      "conversationId": "c5f3e281-...",
+      "content": "Hello! I have a question about the vacuum motor.",
+      "type": "TEXT",
+      "isRead": true,
+      "sender": {
+        "id": "cust-01",
+        "firstName": "Jane",
+        "lastName": "Doe",
+        "role": "CUSTOMER"
+      },
+      "attachments": [],
+      "createdAt": "2026-08-31T17:40:00.000Z"
+    }
+  ],
+  "meta": { "totalItems": 1, "currentPage": 1, "totalPages": 1 }
+}
+```
+
+#### 5. Send Message (REST with Direct Photo/File Upload)
+- **Endpoint**: `POST /chat/conversations/:id/messages`
+- **Access**: `CUSTOMER`, `ADMIN`
+- **Content-Type**: `multipart/form-data`
+- **Body**:
+  - `data`: `{"content": "Here is a photo of the clogged wall inlet"}`
+  - `attachments`: `[file.jpg]` (up to 5 files, uploaded to Cloudinary automatically)
+
+#### 6. Mark Conversation Read
+- **Endpoint**: `PATCH /chat/conversations/:id/read`
+- **Access**: `CUSTOMER`, `ADMIN`
+- **Response `200 OK`**:
+```json
+{
+  "success": true,
+  "readAt": "2026-08-31T17:45:00.000Z"
+}
+```
+
+---
+
 ## 🎯 Summary Checklist for Frontend Teams
 
 | Step | Feature Domain | Status | Key Component to Build |
@@ -900,3 +1096,6 @@ socket.on('notification:read_all', () => {
 | **Phase 12** | Invoices & Billing | Ready | Invoice Table, Stripe Payment Modal & HTML Print |
 | **Phase 13** | Reviews | Ready | Star Rating Display & Review Submission Modal |
 | **Phase 14** | AI & Settings | Ready | Floating AI Support Chatbot & Policy Pages |
+| **Phase 15** | CSV Reports & Export | Ready | One-Click CSV Export Action Buttons in Admin Panel |
+| **Phase 16** | Live Support Chat | Ready | Floating Customer Chat Drawer & Admin Live Inbox |
+

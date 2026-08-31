@@ -8,6 +8,7 @@ import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { BillingModule } from './billing/billing.module';
 import { AuthGuard } from './common/guards/auth/auth.guard';
+import { ChatModule } from './chat/chat.module';
 import { CustomersModule } from './customers/customers.module';
 import { EmailModule } from './email/email.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -72,6 +73,7 @@ import { TechniciansModule } from './technicians/technicians.module';
     EmailModule,
     StorageModule,
     NotificationsModule,
+    ChatModule,
     AiModule,
     AuthModule,
     CustomersModule,

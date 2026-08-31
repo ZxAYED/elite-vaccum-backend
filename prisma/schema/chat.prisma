@@ -1,0 +1,85 @@
+// ==========================================
+// 15. LIVE CHAT & MESSAGING SYSTEM
+// ==========================================
+
+enum ChatConversationType {
+  DIRECT
+  SUPPORT
+  SERVICE_JOB
+  ORDER_INQUIRY
+}
+
+enum ChatMessageType {
+  TEXT
+  IMAGE
+  FILE
+  SYSTEM
+}
+
+model ChatConversation {
+  id             String               @id @default(uuid()) @db.Uuid
+  type           ChatConversationType @default(SUPPORT)
+  title          String?              @db.VarChar(200)
+  orderId        String?              @map("order_id") @db.Uuid
+  serviceOrderId String?              @map("service_order_id") @db.Uuid
+  lastMessageAt  DateTime?            @map("last_message_at") @db.Timestamptz
+  lastMessageText String?             @map("last_message_text") @db.Text
+  createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime             @updatedAt @map("updated_at") @db.Timestamptz
+
+  participants   ChatParticipant[]
+  messages       ChatMessage[]
+
+  @@index([type, lastMessageAt])
+  @@map("chat_conversations")
+}
+
+model ChatParticipant {
+  id             String    @id @default(uuid()) @db.Uuid
+  conversationId String    @map("conversation_id") @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  roleInChat     String    @default("MEMBER") @map("role_in_chat") @db.VarChar(50) // MEMBER, ADMIN, TECHNICIAN
+  lastReadAt     DateTime? @map("last_read_at") @db.Timestamptz
+  isMuted        Boolean   @default(false) @map("is_muted")
+  joinedAt       DateTime  @default(now()) @map("joined_at") @db.Timestamptz
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId, lastReadAt])
+  @@map("chat_participants")
+}
+
+model ChatMessage {
+  id             String          @id @default(uuid()) @db.Uuid
+  conversationId String          @map("conversation_id") @db.Uuid
+  senderId       String          @map("sender_id") @db.Uuid
+  type           ChatMessageType @default(TEXT)
+  content        String          @db.Text
+  isRead         Boolean         @default(false) @map("is_read")
+  readAt         DateTime?       @map("read_at") @db.Timestamptz
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz
+
+  conversation ChatConversation        @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User                    @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  attachments  ChatMessageAttachment[]
+
+  @@index([conversationId, createdAt])
+  @@index([senderId, isRead])
+  @@map("chat_messages")
+}
+
+model ChatMessageAttachment {
+  id        String   @id @default(uuid()) @db.Uuid
+  messageId String   @map("message_id") @db.Uuid
+  fileUrl   String   @map("file_url") @db.VarChar(500)
+  fileName  String   @map("file_name") @db.VarChar(255)
+  fileType  String   @map("file_type") @db.VarChar(100)
+  fileSize  Int?     @map("file_size")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@map("chat_message_attachments")
+}
