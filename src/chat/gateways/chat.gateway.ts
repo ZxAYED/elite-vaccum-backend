@@ -182,22 +182,31 @@ export class ChatGateway
     @ConnectedSocket() client: AuthenticatedChatSocket,
     @MessageBody() data: { conversationId: string; content: string; type?: any },
   ) {
-    if (!client.user) return { error: 'Unauthorized' };
+    if (!client.user) return { success: false, error: 'Unauthorized' };
 
-    const message = await this.chatService.sendMessage(
-      data.conversationId,
-      {
-        id: client.user.id,
-        email: client.user.email,
-        role: client.user.role,
-      } as any,
-      {
-        content: data.content,
-        type: data.type,
-      },
-    );
+    try {
+      if (!data?.conversationId || !data?.content?.trim()) {
+        return { success: false, error: 'conversationId and content are required' };
+      }
 
-    return { success: true, message };
+      const message = await this.chatService.sendMessage(
+        data.conversationId,
+        {
+          id: client.user.id,
+          email: client.user.email,
+          role: client.user.role,
+        } as any,
+        {
+          content: data.content.trim(),
+          type: data.type,
+        },
+      );
+
+      return { success: true, message };
+    } catch (err: any) {
+      this.logger.error(`Failed to send message via socket: ${err.message}`);
+      return { success: false, error: err.message || 'Failed to send message' };
+    }
   }
 
   @SubscribeMessage('chat:typing')
@@ -205,14 +214,18 @@ export class ChatGateway
     @ConnectedSocket() client: AuthenticatedChatSocket,
     @MessageBody() data: { conversationId: string; isTyping: boolean },
   ) {
-    if (!client.user) return;
+    if (!client.user || !data?.conversationId) return;
 
-    await this.pubSubService.publish(REDIS_CHANNELS.CHAT_TYPING, {
-      conversationId: data.conversationId,
-      userId: client.user.id,
-      userName: client.user.email,
-      isTyping: data.isTyping,
-    });
+    try {
+      await this.pubSubService.publish(REDIS_CHANNELS.CHAT_TYPING, {
+        conversationId: data.conversationId,
+        userId: client.user.id,
+        userName: client.user.email,
+        isTyping: !!data.isTyping,
+      });
+    } catch (err: any) {
+      this.logger.warn(`Failed to publish typing status: ${err.message}`);
+    }
   }
 
   @SubscribeMessage('chat:mark_read')
@@ -220,9 +233,14 @@ export class ChatGateway
     @ConnectedSocket() client: AuthenticatedChatSocket,
     @MessageBody() data: { conversationId: string },
   ) {
-    if (!client.user) return;
+    if (!client.user || !data?.conversationId) return;
 
-    return this.chatService.markConversationAsRead(data.conversationId, client.user.id);
+    try {
+      return await this.chatService.markConversationAsRead(data.conversationId, client.user.id);
+    } catch (err: any) {
+      this.logger.warn(`Failed to mark conversation read: ${err.message}`);
+      return { success: false, error: err.message };
+    }
   }
 
   private extractToken(client: Socket): string | null {
