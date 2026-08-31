@@ -8,12 +8,14 @@ import {
 import { Prisma, UserRole } from '@prisma/client';
 import { RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { getPagination } from 'src/common/utils/pagination';
+import { EmailService } from 'src/email/email.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { RedisService } from 'src/redis';
+import { REDIS_CHANNELS } from 'src/redis/constants/redis.constants';
+import { RedisPubSubService } from 'src/redis/redis-pubsub.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { NotificationQueryDto } from './dto/notification-query.dto';
-import { NotificationsGateway } from './gateways/notifications.gateway';
-import { NotificationsQueueService } from './queues/notifications-queue.service';
+import { NotificationPubSubPayload } from './gateways/notifications.gateway';
 
 @Injectable()
 export class NotificationsService {
@@ -22,8 +24,8 @@ export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
-    private readonly queueService: NotificationsQueueService,
-    private readonly gateway: NotificationsGateway,
+    private readonly pubSub: RedisPubSubService,
+    private readonly emailService: EmailService,
   ) {}
 
   private isAdmin(user?: RequestUser | null): boolean {
@@ -31,27 +33,112 @@ export class NotificationsService {
   }
 
   // ==========================================
-  // DISPATCH / CREATE NOTIFICATION (BullMQ)
+  // DISPATCH NOTIFICATION (Direct + Redis PubSub)
   // ==========================================
 
   /**
-   * Dispatches a notification asynchronously via the BullMQ resilient queue.
+   * Creates and dispatches a notification with database persistence,
+   * Redis unread cache updates, Redis PubSub live streaming, and optional email delivery.
    */
   async create(dto: CreateNotificationDto, caller?: RequestUser) {
-    // If called via API, ensure non-admins can only trigger notifications for themselves or system events
     if (caller && !this.isAdmin(caller) && dto.userId !== caller.id) {
       throw new ForbiddenException(
         'You do not have permission to send notifications to other users',
       );
     }
 
-    const { jobId } = await this.queueService.enqueue(dto);
+    // 1. Verify recipient user exists
+    const user = await this.prisma.user.findUnique({
+      where: { id: dto.userId },
+      include: { notificationPreference: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Recipient user not found');
+    }
+
+    // 2. Persist to PostgreSQL Database
+    const notification = await this.prisma.notification.create({
+      data: {
+        userId: dto.userId,
+        type: dto.type,
+        title: dto.title.trim(),
+        message: dto.message.trim(),
+        ctaLabel: dto.ctaLabel?.trim() || null,
+        ctaUrl: dto.ctaUrl?.trim() || null,
+        metadata: dto.metadata || undefined,
+        isRead: false,
+      },
+    });
+
+    // 3. Compute and Cache Fresh Unread Count in Redis (60s TTL)
+    const unreadCount = await this.prisma.notification.count({
+      where: { userId: dto.userId, isRead: false },
+    });
+    const cacheKey = `notifications:unread_count:${dto.userId}`;
+    await this.redis.set(cacheKey, unreadCount, 60);
+
+    // 4. Publish Real-Time Event to Redis PubSub (broadcasts across all gateway nodes)
+    await this.pubSub.publish<NotificationPubSubPayload>(
+      REDIS_CHANNELS.NOTIFICATIONS,
+      {
+        target: 'user',
+        targetId: dto.userId,
+        event: 'notification:new',
+        data: { notification, unreadCount },
+      },
+    );
+
+    await this.pubSub.publish<NotificationPubSubPayload>(
+      REDIS_CHANNELS.NOTIFICATIONS,
+      {
+        target: 'user',
+        targetId: dto.userId,
+        event: 'notification:unread_count',
+        data: { unreadCount },
+      },
+    );
+
+    // 5. Asynchronous Optional Email Notification
+    const shouldSendEmail =
+      dto.sendEmail ||
+      user.notificationPreference?.emailNotifications !== false;
+
+    if (dto.sendEmail && user.email && shouldSendEmail) {
+      this.emailService
+        .sendEmail({
+          to: user.email,
+          subject: dto.title,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+              <h2 style="color: #004488; margin-top: 0;">${dto.title}</h2>
+              <p style="font-size: 16px; color: #333; line-height: 1.5;">${dto.message}</p>
+              ${
+                dto.ctaUrl
+                  ? `<div style="margin-top: 25px;">
+                      <a href="${dto.ctaUrl}" style="background-color: #0066cc; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; display: inline-block;">
+                        ${dto.ctaLabel || 'View Details'}
+                      </a>
+                    </div>`
+                  : ''
+              }
+              <hr style="margin-top: 30px; border: none; border-top: 1px solid #eee;" />
+              <p style="font-size: 12px; color: #888;">Elite Vacuum Service Platform Notification System</p>
+            </div>
+          `,
+        })
+        .catch((err) => {
+          this.logger.warn(
+            `Asynchronous email dispatch note for ${user.email}: ${err.message}`,
+          );
+        });
+    }
 
     return {
       success: true,
-      message: 'Notification enqueued for delivery',
-      jobId,
-      recipientUserId: dto.userId,
+      message: 'Notification dispatched and published successfully',
+      notification,
+      unreadCount,
     };
   }
 
@@ -95,7 +182,7 @@ export class NotificationsService {
   }
 
   /**
-   * Retrieves unread notification count with fast Redis caching (30s TTL).
+   * Retrieves unread notification count with fast Redis caching (60s TTL).
    */
   async getUnreadCount(userId: string): Promise<number> {
     const cacheKey = `notifications:unread_count:${userId}`;
@@ -112,8 +199,8 @@ export class NotificationsService {
       },
     });
 
-    // Cache unread count in Redis for 30s
-    await this.redis.set(cacheKey, count, 30);
+    // Cache unread count in Redis for 60s
+    await this.redis.set(cacheKey, count, 60);
 
     return count;
   }
@@ -123,7 +210,7 @@ export class NotificationsService {
   // ==========================================
 
   /**
-   * Marks a single notification as read and emits real-time WebSocket events.
+   * Marks a single notification as read and publishes real-time Redis PubSub events.
    */
   async markAsRead(id: string, userId: string) {
     const notification = await this.prisma.notification.findUnique({
@@ -154,21 +241,31 @@ export class NotificationsService {
       },
     });
 
-    // Invalidate Redis cache
-    await this.redis.del(`notifications:unread_count:${userId}`);
-
+    // Invalidate and refresh Redis unread count cache
+    const cacheKey = `notifications:unread_count:${userId}`;
+    await this.redis.del(cacheKey);
     const unreadCount = await this.getUnreadCount(userId);
 
-    // Emit Real-Time WebSocket event
-    this.gateway.sendToUser(userId, 'notification:read', {
-      notificationId: id,
-      readAt: updated.readAt,
-      unreadCount,
-    });
+    // Publish to Redis PubSub
+    await this.pubSub.publish<NotificationPubSubPayload>(
+      REDIS_CHANNELS.NOTIFICATIONS,
+      {
+        target: 'user',
+        targetId: userId,
+        event: 'notification:read',
+        data: { notificationId: id, readAt: updated.readAt, unreadCount },
+      },
+    );
 
-    this.gateway.sendToUser(userId, 'notification:unread_count', {
-      unreadCount,
-    });
+    await this.pubSub.publish<NotificationPubSubPayload>(
+      REDIS_CHANNELS.NOTIFICATIONS,
+      {
+        target: 'user',
+        targetId: userId,
+        event: 'notification:unread_count',
+        data: { unreadCount },
+      },
+    );
 
     return {
       success: true,
@@ -195,19 +292,30 @@ export class NotificationsService {
       },
     });
 
-    // Set unread count to 0 in Redis
-    await this.redis.set(`notifications:unread_count:${userId}`, 0, 30);
+    // Set unread count to 0 in Redis cache
+    const cacheKey = `notifications:unread_count:${userId}`;
+    await this.redis.set(cacheKey, 0, 60);
 
-    // Emit Real-Time WebSocket event
-    this.gateway.sendToUser(userId, 'notification:all_read', {
-      count: result.count,
-      readAt: now.toISOString(),
-      unreadCount: 0,
-    });
+    // Publish to Redis PubSub
+    await this.pubSub.publish<NotificationPubSubPayload>(
+      REDIS_CHANNELS.NOTIFICATIONS,
+      {
+        target: 'user',
+        targetId: userId,
+        event: 'notification:all_read',
+        data: { count: result.count, readAt: now.toISOString(), unreadCount: 0 },
+      },
+    );
 
-    this.gateway.sendToUser(userId, 'notification:unread_count', {
-      unreadCount: 0,
-    });
+    await this.pubSub.publish<NotificationPubSubPayload>(
+      REDIS_CHANNELS.NOTIFICATIONS,
+      {
+        target: 'user',
+        targetId: userId,
+        event: 'notification:unread_count',
+        data: { unreadCount: 0 },
+      },
+    );
 
     return {
       success: true,
@@ -241,14 +349,20 @@ export class NotificationsService {
       where: { id },
     });
 
-    await this.redis.del(`notifications:unread_count:${userId}`);
-
+    const cacheKey = `notifications:unread_count:${userId}`;
+    await this.redis.del(cacheKey);
     const unreadCount = await this.getUnreadCount(userId);
 
-    this.gateway.sendToUser(userId, 'notification:deleted', {
-      notificationId: id,
-      unreadCount,
-    });
+    // Publish to Redis PubSub
+    await this.pubSub.publish<NotificationPubSubPayload>(
+      REDIS_CHANNELS.NOTIFICATIONS,
+      {
+        target: 'user',
+        targetId: userId,
+        event: 'notification:deleted',
+        data: { notificationId: id, unreadCount },
+      },
+    );
 
     return {
       success: true,

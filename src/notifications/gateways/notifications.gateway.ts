@@ -12,6 +12,9 @@ import {
 import { UserRole } from '@prisma/client';
 import { Server, Socket } from 'socket.io';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { REDIS_CHANNELS } from 'src/redis/constants/redis.constants';
+import { RedisPresenceService } from 'src/redis/redis-presence.service';
+import { RedisPubSubService } from 'src/redis/redis-pubsub.service';
 
 export interface AuthenticatedSocket extends Socket {
   user?: {
@@ -19,6 +22,14 @@ export interface AuthenticatedSocket extends Socket {
     email: string;
     role: UserRole;
   };
+}
+
+export interface NotificationPubSubPayload {
+  target: 'user' | 'role' | 'broadcast';
+  targetId?: string;
+  role?: UserRole;
+  event: string;
+  data: any;
 }
 
 @WebSocketGateway({
@@ -36,17 +47,26 @@ export class NotificationsGateway
   @WebSocketServer()
   server: Server;
 
-  // In-memory mapping of userId -> Set of active socket IDs
-  private readonly activeUserSockets = new Map<string, Set<string>>();
-
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly presenceService: RedisPresenceService,
+    private readonly pubSubService: RedisPubSubService,
   ) {}
 
-  afterInit(server: Server) {
+  async afterInit(server: Server) {
     this.logger.log('🔔 Notifications WebSocket Gateway initialized on namespace /notifications');
+
+    // Subscribe to Redis PubSub channel for multi-instance cluster synchronization
+    await this.pubSubService.subscribe<NotificationPubSubPayload>(
+      REDIS_CHANNELS.NOTIFICATIONS,
+      (payload) => {
+        this.handlePubSubNotification(payload);
+      },
+    );
+
+    this.logger.log(`📡 NotificationsGateway subscribed to Redis channel: '${REDIS_CHANNELS.NOTIFICATIONS}'`);
   }
 
   async handleConnection(client: AuthenticatedSocket) {
@@ -87,16 +107,17 @@ export class NotificationsGateway
         role: user.role,
       };
 
-      // Join user specific room and role room
+      // Join user specific room and role room in Socket.io
       const userRoom = `user:${user.id}`;
       const roleRoom = `role:${user.role}`;
       await client.join([userRoom, roleRoom]);
 
-      // Track active sockets
-      if (!this.activeUserSockets.has(user.id)) {
-        this.activeUserSockets.set(user.id, new Set());
-      }
-      this.activeUserSockets.get(user.id)!.add(client.id);
+      // Wire presence tracking strictly in Redis (distributed & persistent)
+      await this.presenceService.trackDeviceConnected(user.id, client.id, {
+        userAgent: client.handshake.headers['user-agent'] as string,
+        ipAddress: client.handshake.address,
+        metadata: { role: user.role, email: user.email },
+      });
 
       this.logger.log(
         `⚡ Client connected: User [${user.email} | ${user.role}] (Socket: ${client.id})`,
@@ -116,16 +137,11 @@ export class NotificationsGateway
     }
   }
 
-  handleDisconnect(client: AuthenticatedSocket) {
+  async handleDisconnect(client: AuthenticatedSocket) {
     if (client.user?.id) {
       const userId = client.user.id;
-      const userSockets = this.activeUserSockets.get(userId);
-      if (userSockets) {
-        userSockets.delete(client.id);
-        if (userSockets.size === 0) {
-          this.activeUserSockets.delete(userId);
-        }
-      }
+      // Untrack socket session from Redis
+      await this.presenceService.trackDeviceDisconnected(userId, client.id);
       this.logger.log(`🔌 Client disconnected: User [${client.user.email}] (Socket: ${client.id})`);
     } else {
       this.logger.log(`🔌 Anonymous socket disconnected: ${client.id}`);
@@ -155,41 +171,78 @@ export class NotificationsGateway
   }
 
   // ==========================================
-  // DISPATCH & BROADCAST HELPERS
+  // PUBSUB DISPATCHER & BROADCAST HELPERS
   // ==========================================
 
   /**
-   * Emits a real-time notification event to a specific user across all their active sessions/devices.
+   * Internal listener: Receives cross-instance notification events from Redis PubSub and emits to local sockets.
    */
-  sendToUser(userId: string, event: string, payload: any) {
-    const room = `user:${userId}`;
-    this.server.to(room).emit(event, payload);
-    this.logger.debug(`Sent WS event '${event}' to user room '${room}'`);
+  private handlePubSubNotification(payload: NotificationPubSubPayload) {
+    if (!this.server) return;
+
+    if (payload.target === 'user' && payload.targetId) {
+      const room = `user:${payload.targetId}`;
+      this.server.to(room).emit(payload.event, payload.data);
+      this.logger.debug(`[Redis PubSub -> WS] Emitted '${payload.event}' to room '${room}'`);
+    } else if (payload.target === 'role' && payload.role) {
+      const room = `role:${payload.role}`;
+      this.server.to(room).emit(payload.event, payload.data);
+      this.logger.debug(`[Redis PubSub -> WS] Emitted '${payload.event}' to role room '${room}'`);
+    } else if (payload.target === 'broadcast') {
+      this.server.emit(payload.event, payload.data);
+      this.logger.debug(`[Redis PubSub -> WS] Broadcasted '${payload.event}' to all clients`);
+    }
   }
 
   /**
-   * Emits an event to all users with a specific role (e.g. 'ADMIN' or 'TECHNICIAN').
+   * Publishes notification event to Redis PubSub (which broadcasts across all cluster instances).
    */
-  sendToRole(role: UserRole, event: string, payload: any) {
-    const room = `role:${role}`;
-    this.server.to(room).emit(event, payload);
-    this.logger.debug(`Sent WS event '${event}' to role room '${room}'`);
+  async sendToUser(userId: string, event: string, payload: any): Promise<void> {
+    await this.pubSubService.publish<NotificationPubSubPayload>(
+      REDIS_CHANNELS.NOTIFICATIONS,
+      {
+        target: 'user',
+        targetId: userId,
+        event,
+        data: payload,
+      },
+    );
   }
 
   /**
-   * Broadcasts a system alert to all currently connected clients.
+   * Publishes role event to Redis PubSub.
    */
-  broadcast(event: string, payload: any) {
-    this.server.emit(event, payload);
-    this.logger.debug(`Broadcasted WS event '${event}' to all clients`);
+  async sendToRole(role: UserRole, event: string, payload: any): Promise<void> {
+    await this.pubSubService.publish<NotificationPubSubPayload>(
+      REDIS_CHANNELS.NOTIFICATIONS,
+      {
+        target: 'role',
+        role,
+        event,
+        data: payload,
+      },
+    );
   }
 
   /**
-   * Checks if a user is currently online with an active WebSocket connection.
+   * Publishes system-wide broadcast event to Redis PubSub.
    */
-  isUserOnline(userId: string): boolean {
-    const sockets = this.activeUserSockets.get(userId);
-    return !!sockets && sockets.size > 0;
+  async broadcast(event: string, payload: any): Promise<void> {
+    await this.pubSubService.publish<NotificationPubSubPayload>(
+      REDIS_CHANNELS.NOTIFICATIONS,
+      {
+        target: 'broadcast',
+        event,
+        data: payload,
+      },
+    );
+  }
+
+  /**
+   * Checks if user is currently online via Redis presence state.
+   */
+  async isUserOnline(userId: string): Promise<boolean> {
+    return this.presenceService.isUserOnline(userId);
   }
 
   // ==========================================
@@ -197,7 +250,10 @@ export class NotificationsGateway
   // ==========================================
 
   @SubscribeMessage('notifications:ping')
-  handlePing(client: AuthenticatedSocket) {
+  async handlePing(client: AuthenticatedSocket) {
+    if (client.user?.id) {
+      await this.presenceService.heartbeat(client.user.id);
+    }
     return { event: 'notifications:pong', data: { timestamp: Date.now() } };
   }
 }
