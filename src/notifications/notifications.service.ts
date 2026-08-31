@@ -1,9 +1,11 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common';
 import { Prisma, UserRole } from '@prisma/client';
 import { RequestUser } from 'src/common/decorator/currentUser.decorator';
@@ -16,6 +18,7 @@ import { RedisPubSubService } from 'src/redis/redis-pubsub.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { NotificationQueryDto } from './dto/notification-query.dto';
 import { NotificationPubSubPayload } from './gateways/notifications.gateway';
+import { NotificationsQueueService } from './queues/notifications-queue.service';
 
 @Injectable()
 export class NotificationsService {
@@ -26,6 +29,8 @@ export class NotificationsService {
     private readonly redis: RedisService,
     private readonly pubSub: RedisPubSubService,
     private readonly emailService: EmailService,
+    @Inject(forwardRef(() => NotificationsQueueService))
+    private readonly queueService: NotificationsQueueService,
   ) {}
 
   private isAdmin(user?: RequestUser | null): boolean {
@@ -33,12 +38,12 @@ export class NotificationsService {
   }
 
   // ==========================================
-  // DISPATCH NOTIFICATION (Direct + Redis PubSub)
+  // DISPATCH NOTIFICATION (BullMQ Queue)
   // ==========================================
 
   /**
-   * Creates and dispatches a notification with database persistence,
-   * Redis unread cache updates, Redis PubSub live streaming, and optional email delivery.
+   * Enqueues a notification into the BullMQ background queue for asynchronous,
+   * resilient delivery with automatic retries and rate limiting.
    */
   async create(dto: CreateNotificationDto, caller?: RequestUser) {
     if (caller && !this.isAdmin(caller) && dto.userId !== caller.id) {
@@ -47,6 +52,23 @@ export class NotificationsService {
       );
     }
 
+    const { jobId } = await this.queueService.enqueue(dto);
+
+    return {
+      success: true,
+      message: 'Notification enqueued for processing via BullMQ',
+      jobId,
+      recipientUserId: dto.userId,
+    };
+  }
+
+  /**
+   * Core notification processor (called by BullMQ Worker or direct dispatcher).
+   * Persists to PostgreSQL, computes Redis unread cache, broadcasts via Redis PubSub, and sends email.
+   */
+  async processNotification(dto: CreateNotificationDto) {
+    this.logger.log(`Processing notification for User [${dto.userId}] - Title: "${dto.title}"`);
+
     // 1. Verify recipient user exists
     const user = await this.prisma.user.findUnique({
       where: { id: dto.userId },
@@ -54,7 +76,8 @@ export class NotificationsService {
     });
 
     if (!user) {
-      throw new NotFoundException('Recipient user not found');
+      this.logger.warn(`Recipient User '${dto.userId}' not found. Skipping delivery.`);
+      return { status: 'SKIPPED_USER_NOT_FOUND' };
     }
 
     // 2. Persist to PostgreSQL Database
@@ -78,7 +101,7 @@ export class NotificationsService {
     const cacheKey = `notifications:unread_count:${dto.userId}`;
     await this.redis.set(cacheKey, unreadCount, 60);
 
-    // 4. Publish Real-Time Event to Redis PubSub (broadcasts across all gateway nodes)
+    // 4. Publish Real-Time Event to Redis PubSub (broadcasts across all WebSocket gateway nodes)
     await this.pubSub.publish<NotificationPubSubPayload>(
       REDIS_CHANNELS.NOTIFICATIONS,
       {
@@ -135,11 +158,17 @@ export class NotificationsService {
     }
 
     return {
-      success: true,
-      message: 'Notification dispatched and published successfully',
-      notification,
+      status: 'PROCESSED',
+      notificationId: notification.id,
       unreadCount,
     };
+  }
+
+  /**
+   * Direct dispatch bypassing the queue when synchronous processing is explicitly needed.
+   */
+  async dispatchDirect(dto: CreateNotificationDto) {
+    return this.processNotification(dto);
   }
 
   // ==========================================
