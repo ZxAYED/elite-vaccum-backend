@@ -21,12 +21,12 @@
 
 <p align="center">
   <a href="#-system-architecture">Architecture</a> &bull;
+  <a href="#-frontend-api-integration-guide">API Integration Guide</a> &bull;
   <a href="#-key-capabilities">Key Features</a> &bull;
   <a href="#-module-breakdown">Modules</a> &bull;
   <a href="#-real-time-notifications--websocket">Notifications & WebSockets</a> &bull;
   <a href="#-redis--concurrency-architecture">Redis & Concurrency</a> &bull;
-  <a href="#-quick-start">Quick Start</a> &bull;
-  <a href="#-documentation-guides">Documentation</a>
+  <a href="#-quick-start">Quick Start</a>
 </p>
 
 ---
@@ -321,12 +321,29 @@ npm run test:e2e
 
 ---
 
-## 📚 Documentation Guides
+## 📖 Frontend API Integration Guide
 
-For comprehensive domain-specific API guides, refer to:
-- 📖 [**Services, Scheduling & Operations Guide**](./docs/SERVICE_API_GUIDE.md)
-- 🛒 [**Store, Products, Cart & Orders Guide**](./docs/STORE_API_GUIDE.md)
-- ⚡ [**Redis, Pub/Sub, Presence & BullMQ Guide**](./docs/REDIS_GUIDE.md)
+For the full phase-by-phase frontend integration roadmap covering all 14 feature domains with exact schemas, example payloads, error codes, and frontend recipes:
+
+👉 **[Complete Phase-by-Phase Frontend API Integration Guide (14 Phases)](./docs/API_INTEGRATION_GUIDE.md)**
+
+| Phase | Feature Domain | Status | Description |
+| :--- | :--- | :--- | :--- |
+| **Phase 0** | Global Architecture & Client Setup | ✅ Ready | Axios interceptor, Base URLs, HttpOnly cookies, pagination |
+| **Phase 1** | Authentication & User Accounts | ✅ Ready | Register, Email OTP, Login, `/auth/me`, Password Reset |
+| **Phase 2** | Categories & Taxonomy | ✅ Ready | Category hierarchy with active product counters |
+| **Phase 3** | Products Catalog & Search | ✅ Ready | Multi-attribute search, filter, sort, and image upload |
+| **Phase 4** | Shopping Cart Management | ✅ Ready | Live price recalculation, stock checks, free shipping threshold |
+| **Phase 5** | Saved Delivery Addresses | ✅ Ready | Address book CRUD, default delivery address selection |
+| **Phase 6** | E-Commerce Orders & Checkout | ✅ Ready | Stripe Checkout Session, COD, live tracking timeline |
+| **Phase 7** | Services Catalog & Scheduling | ✅ Ready | Service offerings, dynamic slot availability engine |
+| **Phase 8** | Service Intake Requests | ✅ Ready | Multi-step intake with symptom tags & media attachments |
+| **Phase 9** | Quotations & Customer Approval | ✅ Ready | Itemized estimates, atomic Accept/Reject with Redis locks |
+| **Phase 10** | Service Orders & Field Dispatch | ✅ Ready | Technician assignment, live ETA updates, completion reports |
+| **Phase 11** | Real-Time Notifications & WSS | ✅ Ready | WebSocket Gateway, BullMQ delivery, unread badge counter |
+| **Phase 12** | Invoicing, Payments & Refunds | ✅ Ready | Multi-line invoices, Stripe PaymentIntent, printable HTML |
+| **Phase 13** | Customer Reviews & Ratings | ✅ Ready | Verified customer reviews, 5-star rating aggregates |
+| **Phase 14** | Analytics, Settings & AI Assistant | ✅ Ready | Executive KPI reports, FAQs, policies, Gemini SSE stream |
 
 ---
 
