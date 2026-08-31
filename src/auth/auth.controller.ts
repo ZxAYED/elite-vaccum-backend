@@ -7,6 +7,7 @@ import {
   Res,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import type { CookieOptions } from 'express';
 import {
@@ -56,6 +57,7 @@ export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('signup')
   @ApiOperation({ summary: 'Register a new customer account' })
   @ApiBody({ type: SignupDto })
@@ -72,6 +74,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('resend-otp')
   @ApiOperation({ summary: 'Resend the registration email verification OTP' })
   @ApiBody({ type: ResendOtpDto })
@@ -88,6 +91,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('verify-otp')
   @ApiOperation({ summary: 'Verify a newly registered account using OTP' })
   @ApiBody({ type: VerifyOtpDto })
@@ -104,6 +108,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('login')
   @ApiOperation({
     summary:
@@ -139,6 +144,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('forgot-password')
   @ApiOperation({ summary: 'Send a password reset OTP to the user email' })
   @ApiBody({ type: ForgotPasswordDto })
@@ -155,6 +161,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('reset-password')
   @ApiOperation({ summary: 'Reset password using a valid OTP' })
   @ApiBody({ type: ResetPasswordDto })
@@ -172,6 +179,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 15, ttl: 60000 } })
   @Post('refresh-token')
   @ApiOperation({
     summary:

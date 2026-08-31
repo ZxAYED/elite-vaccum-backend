@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JobsOptions, Queue } from 'bullmq';
+import { createBullMQRedisConnection } from 'src/redis/redis.config';
 
 export const CHAT_QUEUE_NAME = 'chat-messages';
 
@@ -25,7 +26,7 @@ export class ChatQueueService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly configService: ConfigService) {}
 
   onModuleInit() {
-    const connection = this.resolveBullMQConnection();
+    const connection = createBullMQRedisConnection(this.configService);
 
     this.queue = new Queue<ChatMessageJobData>(CHAT_QUEUE_NAME, {
       connection,
@@ -58,51 +59,31 @@ export class ChatQueueService implements OnModuleInit, OnModuleDestroy {
 
   async enqueueOfflineAlert(
     data: ChatMessageJobData,
-    delayMs = 120000, // 2 minutes delayed check
     options?: JobsOptions,
   ): Promise<{ jobId: string }> {
-    const job = await this.queue.add('offline-notification-check', data, {
-      delay: delayMs,
-      ...options,
-    });
-
-    return { jobId: job.id as string };
-  }
-
-  private resolveBullMQConnection() {
-    const redisUrl =
-      this.configService.get<string>('REDIS_URL') ||
-      this.configService.get<string>('UPSTASH_REDIS_URL');
-
-    if (redisUrl) {
-      try {
-        const parsed = new URL(redisUrl);
-        return {
-          host: parsed.hostname,
-          port: Number(parsed.port) || 6379,
-          username: parsed.username || 'default',
-          password: parsed.password || undefined,
-          tls: parsed.protocol === 'rediss:' ? {} : undefined,
-          maxRetriesPerRequest: null,
-          enableReadyCheck: false,
-        };
-      } catch {
-        // fallback
-      }
+    if (!this.queue) {
+      this.logger.warn(`Queue '${CHAT_QUEUE_NAME}' is not initialized. Skipping offline check.`);
+      return { jobId: 'skipped' };
     }
 
-    const host = this.configService.get<string>('REDIS_HOST', 'localhost');
-    const port = Number(this.configService.get<number>('REDIS_PORT', 6379));
-    const password = this.configService.get<string>('REDIS_PASSWORD');
-    const tlsEnabled = this.configService.get<string>('REDIS_TLS') === 'true';
+    try {
+      // Delay 2 minutes: if user hasn't read the message in 2 minutes, send an email alert
+      const delayMs = 2 * 60 * 1000;
 
-    return {
-      host,
-      port,
-      password: password || undefined,
-      tls: tlsEnabled ? {} : undefined,
-      maxRetriesPerRequest: null,
-      enableReadyCheck: false,
-    };
+      const job = await this.queue.add('check_offline_read', data, {
+        delay: delayMs,
+        priority: 2,
+        ...options,
+      });
+
+      this.logger.debug(
+        `[BullMQ] Enqueued offline email alert check for message '${data.messageId}' in conversation '${data.conversationId}' (Delay: 2m)`,
+      );
+
+      return { jobId: job.id as string };
+    } catch (err: any) {
+      this.logger.error(`Failed to enqueue offline alert for chat: ${err.message}`, err.stack);
+      throw err;
+    }
   }
 }

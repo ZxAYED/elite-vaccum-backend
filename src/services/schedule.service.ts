@@ -279,85 +279,101 @@ export class ScheduleService {
       throw new BadRequestException('Start time must be earlier than end time');
     }
 
-    // 2. Conflict Prevention: Check if technician is already booked
-    if (dto.technicianId) {
-      const conflict = await this.prisma.appointment.findFirst({
-        where: {
-          technicianId: dto.technicianId,
-          status: { notIn: ['CANCELLED'] },
-          AND: [
-            { startAt: { lt: endAt } },
-            { endAt: { gt: startAt } },
-          ],
-        },
-      });
+    const lockKey = `lock:schedule:${dto.technicianId || 'unassigned'}:${dto.date}:${dto.startTime}`;
+    const lockToken = await this.redis.acquireLock(lockKey, {
+      ttlMs: 10000,
+      retryCount: 0,
+    });
 
-      if (conflict) {
-        throw new BadRequestException(
-          `Technician is already booked for another appointment between ${conflict.startAt.toISOString()} and ${conflict.endAt.toISOString()}`,
-        );
-      }
+    if (!lockToken) {
+      throw new BadRequestException(
+        'This time slot is currently being booked by another request. Please try again.',
+      );
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      // 3. Create Appointment
-      const appointment = await tx.appointment.create({
-        data: {
-          serviceOrderId: serviceOrderId || null,
-          serviceRequestId: serviceRequestId!,
-          technicianId: dto.technicianId || null,
-          status: 'CONFIRMED',
-          startAt,
-          endAt,
-          addressSnapshot,
-          notes: dto.notes?.trim() || null,
-          adminNote: dto.adminNote?.trim() || null,
-        },
-        include: this.appointmentInclude(),
-      });
+    try {
+      // 2. Conflict Prevention: Check if technician is already booked
+      if (dto.technicianId) {
+        const conflict = await this.prisma.appointment.findFirst({
+          where: {
+            technicianId: dto.technicianId,
+            status: { notIn: ['CANCELLED'] },
+            AND: [
+              { startAt: { lt: endAt } },
+              { endAt: { gt: startAt } },
+            ],
+          },
+        });
 
-      // 4. Update Service Request status to SCHEDULED
-      if (serviceRequestId) {
-        await tx.serviceRequest.update({
-          where: { id: serviceRequestId },
+        if (conflict) {
+          throw new BadRequestException(
+            `Technician is already booked for another appointment between ${conflict.startAt.toISOString()} and ${conflict.endAt.toISOString()}`,
+          );
+        }
+      }
+
+      return await this.prisma.$transaction(async (tx) => {
+        // 3. Create Appointment
+        const appointment = await tx.appointment.create({
           data: {
-            status: ServiceRequestStatus.SCHEDULED,
-            currentSchedule: {
-              date: dto.date,
-              startTime: dto.startTime,
-              endTime: dto.endTime,
-              appointmentId: appointment.id,
-              scheduledAt: new Date().toISOString(),
-              technicianId: dto.technicianId || null,
+            serviceOrderId: serviceOrderId || null,
+            serviceRequestId: serviceRequestId!,
+            technicianId: dto.technicianId || null,
+            status: 'CONFIRMED',
+            startAt,
+            endAt,
+            addressSnapshot,
+            notes: dto.notes?.trim() || null,
+            adminNote: dto.adminNote?.trim() || null,
+          },
+          include: this.appointmentInclude(),
+        });
+
+        // 4. Update Service Request status to SCHEDULED
+        if (serviceRequestId) {
+          await tx.serviceRequest.update({
+            where: { id: serviceRequestId },
+            data: {
+              status: ServiceRequestStatus.SCHEDULED,
+              currentSchedule: {
+                date: dto.date,
+                startTime: dto.startTime,
+                endTime: dto.endTime,
+                appointmentId: appointment.id,
+                scheduledAt: new Date().toISOString(),
+                technicianId: dto.technicianId || null,
+              },
             },
-          },
-        });
-      }
+          });
+        }
 
-      // 5. Update Service Order if linked
-      if (serviceOrderId) {
-        await tx.serviceOrder.update({
-          where: { id: serviceOrderId },
-          data: {
-            status: ServiceOrderStatus.SCHEDULED,
-            scheduledAt: startAt,
-            assignedTechnicianId: dto.technicianId || null,
-          },
-        });
-      }
+        // 5. Update Service Order if linked
+        if (serviceOrderId) {
+          await tx.serviceOrder.update({
+            where: { id: serviceOrderId },
+            data: {
+              status: ServiceOrderStatus.SCHEDULED,
+              scheduledAt: startAt,
+              assignedTechnicianId: dto.technicianId || null,
+            },
+          });
+        }
 
-      this.logger.log(
-        `Appointment scheduled for ${dto.date} (${dto.startTime} - ${dto.endTime}) by Admin (${user.email})`,
-      );
+        this.logger.log(
+          `Appointment scheduled for ${dto.date} (${dto.startTime} - ${dto.endTime}) by Admin (${user.email})`,
+        );
 
-      await this.invalidateSlotCache(dto.date);
+        await this.invalidateSlotCache(dto.date);
 
-      return {
-        success: true,
-        message: 'Appointment successfully created and dispatched',
-        appointment,
-      };
-    });
+        return {
+          success: true,
+          message: 'Appointment successfully created and dispatched',
+          appointment,
+        };
+      });
+    } finally {
+      await this.redis.releaseLock(lockKey, lockToken);
+    }
   }
 
   async updateAppointment(

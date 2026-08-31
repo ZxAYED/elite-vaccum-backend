@@ -10,6 +10,7 @@ import { EmailService } from 'src/email/email.service';
 import { EmailTemplateKey } from 'src/email/types/email.types';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { RedisPresenceService } from 'src/redis/redis-presence.service';
+import { createBullMQRedisConnection } from 'src/redis/redis.config';
 import {
   CHAT_QUEUE_NAME,
   ChatMessageJobData,
@@ -28,7 +29,7 @@ export class ChatWorker implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    const connection = this.resolveBullMQConnection();
+    const connection = createBullMQRedisConnection(this.configService);
 
     this.worker = new Worker<ChatMessageJobData>(
       CHAT_QUEUE_NAME,
@@ -116,42 +117,5 @@ export class ChatWorker implements OnModuleInit, OnModuleDestroy {
     }
 
     return { success: true, processedRecipients: recipients.length };
-  }
-
-  private resolveBullMQConnection() {
-    const redisUrl =
-      this.configService.get<string>('REDIS_URL') ||
-      this.configService.get<string>('UPSTASH_REDIS_URL');
-
-    if (redisUrl) {
-      try {
-        const parsed = new URL(redisUrl);
-        return {
-          host: parsed.hostname,
-          port: Number(parsed.port) || 6379,
-          username: parsed.username || 'default',
-          password: parsed.password || undefined,
-          tls: parsed.protocol === 'rediss:' ? {} : undefined,
-          maxRetriesPerRequest: null,
-          enableReadyCheck: false,
-        };
-      } catch {
-        // fallback
-      }
-    }
-
-    const host = this.configService.get<string>('REDIS_HOST', 'localhost');
-    const port = Number(this.configService.get<number>('REDIS_PORT', 6379));
-    const password = this.configService.get<string>('REDIS_PASSWORD');
-    const tlsEnabled = this.configService.get<string>('REDIS_TLS') === 'true';
-
-    return {
-      host,
-      port,
-      password: password || undefined,
-      tls: tlsEnabled ? {} : undefined,
-      maxRetriesPerRequest: null,
-      enableReadyCheck: false,
-    };
   }
 }

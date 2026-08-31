@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Job, Worker } from 'bullmq';
+import { createBullMQRedisConnection } from 'src/redis/redis.config';
 import { CreateNotificationDto } from '../dto/create-notification.dto';
 import { NotificationsService } from '../notifications.service';
 import { NOTIFICATIONS_QUEUE_NAME } from './notifications-queue.service';
@@ -24,7 +25,7 @@ export class NotificationsWorker implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    const connection = this.resolveBullMQConnection();
+    const connection = createBullMQRedisConnection(this.configService);
 
     this.worker = new Worker<CreateNotificationDto>(
       NOTIFICATIONS_QUEUE_NAME,
@@ -63,43 +64,5 @@ export class NotificationsWorker implements OnModuleInit, OnModuleDestroy {
       await this.worker.close();
       this.logger.log(`BullMQ Worker for '${NOTIFICATIONS_QUEUE_NAME}' stopped`);
     }
-  }
-
-  private resolveBullMQConnection(): any {
-    const redisUrl =
-      this.configService.get<string>('REDIS_URL') || process.env.REDIS_URL;
-
-    if (redisUrl) {
-      const parsed = new URL(redisUrl);
-      const isTls = redisUrl.startsWith('rediss://');
-
-      return {
-        host: parsed.hostname,
-        port: Number(parsed.port || 6379),
-        username: parsed.username || undefined,
-        password: parsed.password || undefined,
-        tls: isTls ? { rejectUnauthorized: false } : undefined,
-        maxRetriesPerRequest: null,
-        enableReadyCheck: false,
-      };
-    }
-
-    return {
-      host:
-        this.configService.get<string>('REDIS_HOST') ||
-        process.env.REDIS_HOST ||
-        '127.0.0.1',
-      port: Number(
-        this.configService.get<number>('REDIS_PORT') ||
-          process.env.REDIS_PORT ||
-          6379,
-      ),
-      password:
-        this.configService.get<string>('REDIS_PASSWORD') ||
-        process.env.REDIS_PASSWORD ||
-        undefined,
-      maxRetriesPerRequest: null,
-      enableReadyCheck: false,
-    };
   }
 }

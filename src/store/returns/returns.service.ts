@@ -163,8 +163,8 @@ export class StoreReturnsService {
       throw new NotFoundException('Order not found');
     }
 
-    if (order.status === ProductOrderStatus.REFUNDED) {
-      throw new BadRequestException('Order has already been refunded');
+    if (order.status === ProductOrderStatus.REFUNDED || order.status === ProductOrderStatus.CANCELLED) {
+      throw new BadRequestException('Order has already been refunded or cancelled (inventory already restored)');
     }
 
     return this.prisma.$transaction(async (tx) => {

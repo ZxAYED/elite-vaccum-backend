@@ -964,6 +964,7 @@ export class StoreOrdersService {
 
     if (
       order.status === ProductOrderStatus.CANCELLED ||
+      order.status === ProductOrderStatus.REFUNDED ||
       order.status === ProductOrderStatus.DELIVERED ||
       order.status === ProductOrderStatus.COMPLETED
     ) {

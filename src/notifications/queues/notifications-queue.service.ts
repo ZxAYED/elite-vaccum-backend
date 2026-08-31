@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JobsOptions, Queue } from 'bullmq';
+import { createBullMQRedisConnection } from 'src/redis/redis.config';
 import { CreateNotificationDto } from '../dto/create-notification.dto';
 
 export const NOTIFICATIONS_QUEUE_NAME = 'notifications-delivery';
@@ -18,7 +19,7 @@ export class NotificationsQueueService implements OnModuleInit, OnModuleDestroy 
   constructor(private readonly configService: ConfigService) {}
 
   onModuleInit() {
-    const connection = this.resolveBullMQConnection();
+    const connection = createBullMQRedisConnection(this.configService);
 
     this.queue = new Queue<CreateNotificationDto>(NOTIFICATIONS_QUEUE_NAME, {
       connection,
@@ -58,57 +59,30 @@ export class NotificationsQueueService implements OnModuleInit, OnModuleDestroy 
     data: CreateNotificationDto,
     options?: JobsOptions,
   ): Promise<{ jobId: string }> {
-    const jobName = `notify:${data.type}:${data.userId}`;
-    const job = await this.queue.add(jobName, data, {
-      priority: data.priority ?? 5,
-      ...options,
-    });
-
-    this.logger.debug(
-      `Enqueued notification job '${job.id}' for User ${data.userId} (Type: ${data.type})`,
-    );
-
-    return { jobId: job.id as string };
-  }
-
-  /**
-   * Resolves Redis connection options strictly conforming to BullMQ requirements (maxRetriesPerRequest: null).
-   */
-  private resolveBullMQConnection(): any {
-    const redisUrl =
-      this.configService.get<string>('REDIS_URL') || process.env.REDIS_URL;
-
-    if (redisUrl) {
-      const parsed = new URL(redisUrl);
-      const isTls = redisUrl.startsWith('rediss://');
-
-      return {
-        host: parsed.hostname,
-        port: Number(parsed.port || 6379),
-        username: parsed.username || undefined,
-        password: parsed.password || undefined,
-        tls: isTls ? { rejectUnauthorized: false } : undefined,
-        maxRetriesPerRequest: null,
-        enableReadyCheck: false,
-      };
+    if (!this.queue) {
+      this.logger.warn(
+        `BullMQ Queue '${NOTIFICATIONS_QUEUE_NAME}' is not initialized. Skipping queue delivery.`,
+      );
+      return { jobId: 'skipped' };
     }
 
-    return {
-      host:
-        this.configService.get<string>('REDIS_HOST') ||
-        process.env.REDIS_HOST ||
-        '127.0.0.1',
-      port: Number(
-        this.configService.get<number>('REDIS_PORT') ||
-          process.env.REDIS_PORT ||
-          6379,
-      ),
-      password:
-        this.configService.get<string>('REDIS_PASSWORD') ||
-        process.env.REDIS_PASSWORD ||
-        undefined,
-      maxRetriesPerRequest: null,
-      enableReadyCheck: false,
-    };
+    try {
+      const job = await this.queue.add('deliver_notification', data, {
+        priority: data.priority || 3,
+        ...options,
+      });
+
+      this.logger.debug(
+        `[BullMQ] Enqueued notification job '${job.id}' for User ${data.userId} (Type: ${data.type})`,
+      );
+
+      return { jobId: job.id as string };
+    } catch (err: any) {
+      this.logger.error(
+        `Failed to enqueue notification job for User ${data.userId}: ${err.message}`,
+        err.stack,
+      );
+      throw err;
+    }
   }
 }
