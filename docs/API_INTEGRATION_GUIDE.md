@@ -11,8 +11,8 @@ Welcome to the **Elite Central Vacuum** API Integration Guide. This document pro
 - [Phase 2: Product Categories & Taxonomy](#phase-2-product-categories--taxonomy)
 - [Phase 3: Products Catalog, Filtering & Media](#phase-3-products-catalog-filtering--media)
 - [Phase 4: Shopping Cart Management](#phase-4-shopping-cart-management)
-- [Phase 5: Customer Delivery Addresses & Profile](#phase-5-customer-delivery-addresses--profile)
-- [Phase 6: E-Commerce Orders, Checkout & Stripe Payment](#phase-6-e-commerce-orders-checkout--stripe-payment)
+- [Phase 5: Customer Delivery Addresses & CRM Management](#phase-5-customer-delivery-addresses--crm-management)
+- [Phase 6: E-Commerce Orders, Checkout, Returns & Invoices](#phase-6-e-commerce-orders-checkout-returns--invoices)
 - [Phase 7: Central Vacuum Services Catalog & Scheduling](#phase-7-central-vacuum-services-catalog--scheduling)
 - [Phase 8: Service Intake Requests & Attachments](#phase-8-service-intake-requests--attachments)
 - [Phase 9: Quotations & Customer Approval](#phase-9-quotations--customer-approval)
@@ -23,6 +23,7 @@ Welcome to the **Elite Central Vacuum** API Integration Guide. This document pro
 - [Phase 14: Analytics, System Settings & AI Assistant](#phase-14-analytics-system-settings--ai-assistant)
 - [Phase 15: CSV Data Export & Reporting](#phase-15-csv-data-export--reporting)
 - [Phase 16: Live Real-Time Support Chat & WebSockets](#phase-16-live-real-time-support-chat--websockets)
+- [Phase 17: Field Technician Mobile Portal & Admin Management](#phase-17-field-technician-portal--mobile-app)
 
 ---
 
@@ -44,7 +45,7 @@ Authorization: Bearer <accessToken>
 ### Cookie Strategy (`credentials: 'include'`)
 The backend uses a hybrid token strategy:
 1. **Access Token (`accessToken`)**: Short-lived (15m–1h) returned in the response body. Store in memory (or secure client state).
-2. **Refresh Token**: Long-lived (30d) automatically set in a secure `HttpOnly`, `SameSite: Lax/None` cookie named `refresh_token`. Ensure your HTTP client has `withCredentials: true` enabled.
+2. **Refresh Token**: Long-lived (30d) automatically set in a secure `HttpOnly`, `SameSite: Lax/None`, `Secure` cookie named `refreshToken`. Ensure your HTTP client has `withCredentials: true` enabled.
 
 ### Standard Axios Setup
 ```typescript
@@ -117,6 +118,7 @@ All paginated GET endpoints follow this structure:
 ### 1.1 Customer Registration
 - **Endpoint**: `POST /auth/signup`
 - **Access**: `Public`
+- **Rate Limit**: `@Throttle: 5 req/min`
 - **Request Body**:
 ```json
 {
@@ -137,6 +139,7 @@ All paginated GET endpoints follow this structure:
 ### 1.2 Verify Email OTP
 - **Endpoint**: `POST /auth/verify-otp`
 - **Access**: `Public`
+- **Rate Limit**: `@Throttle: 5 req/min`
 - **Request Body**:
 ```json
 {
@@ -154,6 +157,7 @@ All paginated GET endpoints follow this structure:
 ### 1.3 Resend Verification OTP
 - **Endpoint**: `POST /auth/resend-otp`
 - **Access**: `Public`
+- **Rate Limit**: `@Throttle: 5 req/min`
 - **Request Body**:
 ```json
 {
@@ -161,9 +165,10 @@ All paginated GET endpoints follow this structure:
 }
 ```
 
-### 1.4 User Login
+### 1.4 User Login (Unified Single Auth Endpoint)
 - **Endpoint**: `POST /auth/login`
 - **Access**: `Public`
+- **Rate Limit**: `@Throttle: 10 req/min`
 - **Request Body**:
 ```json
 {
@@ -171,7 +176,7 @@ All paginated GET endpoints follow this structure:
   "password": "SecurePassword123!"
 }
 ```
-- **Response `200 OK`** (Sets `refresh_token` HttpOnly cookie):
+- **Response `200 OK`** (Sets `refreshToken` HttpOnly cookie):
 ```json
 {
   "user": {
@@ -192,39 +197,56 @@ All paginated GET endpoints follow this structure:
 ### 1.5 Get Current Profile (`/me`)
 - **Endpoint**: `GET /auth/me`
 - **Access**: `Authenticated` (`CUSTOMER`, `ADMIN`, `TECHNICIAN`)
-- **Response `200 OK`**: Returns current `user` object.
+- **Response `200 OK`**: Returns current authenticated `user` object.
 
-### 1.6 Refresh Token
+### 1.6 Refresh Token (Automatic Cookie Rotation)
 - **Endpoint**: `POST /auth/refresh-token`
-- **Access**: `Public` (Relies on `refresh_token` HttpOnly cookie)
+- **Access**: `Public` (Extracts `refreshToken` from HttpOnly cookie or body fallback)
+- **Rate Limit**: `@Throttle: 15 req/min`
 - **Response `200 OK`**: Returns refreshed `accessToken` and user profile.
 
-### 1.7 Forgot & Reset Password
-- **Step 1**: `POST /auth/forgot-password` with `{"email": "customer@example.com"}`
-- **Step 2**: `POST /auth/reset-password` with:
-```json
-{
-  "email": "customer@example.com",
-  "otp": "83719",
-  "newPassword": "NewSecurePassword456!"
-}
-```
-
-### 1.8 Change Password
-- **Endpoint**: `POST /auth/change-password`
-- **Access**: `Authenticated`
+### 1.7 Forgot Password (OTP Request)
+- **Endpoint**: `POST /auth/forgot-password`
+- **Access**: `Public`
+- **Rate Limit**: `@Throttle: 5 req/min`
 - **Request Body**:
 ```json
 {
-  "oldPassword": "SecurePassword123!",
-  "newPassword": "BrandNewPassword789!"
+  "email": "customer@example.com"
 }
 ```
+- **Response `200 OK`**: `{"message": "Password reset OTP sent to your email"}`
 
-### 1.9 Logout
+### 1.8 Reset Password (with OTP)
+- **Endpoint**: `POST /auth/reset-password`
+- **Access**: `Public`
+- **Rate Limit**: `@Throttle: 5 req/min`
+- **Request Body**:
+```json
+{
+  "email": "customer@example.com",
+  "otp": "48291",
+  "newPassword": "NewSecurePassword123!"
+}
+```
+- **Response `200 OK`**: `{"message": "Password reset successfully. Please log in with your new password."}`
+
+### 1.9 Change Password (Authenticated User)
+- **Endpoint**: `POST /auth/change-password`
+- **Access**: `Authenticated` (`CUSTOMER`, `ADMIN`, `TECHNICIAN`)
+- **Request Body**:
+```json
+{
+  "currentPassword": "OldPassword123!",
+  "newPassword": "NewSecurePassword123!"
+}
+```
+- **Response `200 OK`**: `{"message": "Password changed successfully"}`
+
+### 1.10 User Logout
 - **Endpoint**: `POST /auth/logout`
 - **Access**: `Authenticated`
-- **Response `200 OK`**: Clears HttpOnly cookie and revokes session.
+- **Response `200 OK`**: Clears `refreshToken` HttpOnly cookie and invalidates session.
 
 ---
 
@@ -323,7 +345,13 @@ All paginated GET endpoints follow this structure:
 - **Endpoint**: `GET /products/:id` (Accepts UUID, SKU `PROD-...`, or Slug `elite-pro-...`)
 - **Access**: `Public`
 
-### 3.3 Admin Product Creation (Multipart with Images)
+### 3.3 Admin Product List (Full Visibility)
+- **Endpoint**: `GET /products/admin/list`
+- **Access**: `ADMIN`
+- **Query Parameters**: Same as public catalog + status filter (`DRAFT`, `ACTIVE`, `ARCHIVED`).
+- **Response `200 OK`**: Returns full inventory listing with total cost, margin, and stock warnings.
+
+### 3.4 Admin Product Creation (Multipart with Images)
 - **Endpoint**: `POST /products`
 - **Access**: `ADMIN`
 - **Content-Type**: `multipart/form-data`
@@ -342,11 +370,31 @@ All paginated GET endpoints follow this structure:
       "isFeatured": true
     }
     ```
-  - `images`: Binary file attachments (JPEG, PNG, WEBP; max 10 files).
+  - `images`: Binary file attachments (JPEG, PNG, WEBP; max 10 files directly uploaded to Cloudinary).
 
-### 3.4 Admin Quick Stock & Status Updates
-- `PATCH /products/:id/stock` with `{"stock": 40}`
-- `PATCH /products/:id/status` with `{"status": "ACTIVE", "availability": "IN_STOCK"}`
+### 3.5 Admin Unified Product Update (Multipart with Image Management)
+- **Endpoint**: `PATCH /products/:id`
+- **Access**: `ADMIN`
+- **Content-Type**: `multipart/form-data`
+- **Fields**:
+  - `data` *(stringified JSON of UpdateProductDto)*:
+    ```json
+    {
+      "price": 849.99,
+      "stock": 30,
+      "deleteImageIds": ["old-image-uuid-1", "old-image-uuid-2"]
+    }
+    ```
+  - `images`: Optional new binary photo files to append to the product gallery.
+
+### 3.6 Admin Quick Stock & Status Updates
+- **Update Stock**: `PATCH /products/:id/stock` with `{"stock": 40}`
+- **Update Status**: `PATCH /products/:id/status` with `{"status": "ACTIVE", "availability": "IN_STOCK"}`
+
+### 3.7 Admin Delete Product & Images
+- **Delete Product**: `DELETE /products/:id` (`ADMIN` — Safely archives if historical order rows exist, or permanently purges if unpurchased)
+- **Delete Multiple Images**: `DELETE /products/:id/images` with `{"imageIds": ["uuid-1", "uuid-2"]}`
+- **Delete Single Image**: `DELETE /products/:id/images/:imageId`
 
 ---
 
@@ -360,22 +408,19 @@ The cart is tied to the customer's authenticated account and handles real-time s
 - **Response `200 OK`**:
 ```json
 {
-  "id": "cart-uuid-001",
-  "customerId": "cust-uuid-123",
+  "id": "cart-uuid-12345",
   "items": [
     {
       "id": "item-uuid-01",
       "productId": "7a8b9c0d-1e2f-3a4b-5c6d-7e8f9a0b1c2d",
+      "name": "Elite Pro Power Unit 850AW",
+      "sku": "PROD-202608-A19",
+      "priceUsd": "899.99",
       "quantity": 1,
-      "unitPriceUsd": "899.99",
-      "totalUsd": "899.99",
-      "product": {
-        "name": "Elite Pro Power Unit 850AW",
-        "sku": "PROD-202608-A19",
-        "quantity": 18,
-        "availability": "IN_STOCK",
-        "images": [{ "url": "https://res.cloudinary.com/.../ev-850.jpg" }]
-      }
+      "subtotalUsd": "899.99",
+      "imageUrl": "https://res.cloudinary.com/demo/image/upload/v1/ev-850.jpg",
+      "stockAvailable": 18,
+      "isAvailable": true
     }
   ],
   "summary": {
@@ -409,12 +454,35 @@ The cart is tied to the customer's authenticated account and handles real-time s
 - **Request Body**: `{"quantity": 3}`
 
 ### 4.4 Remove Item & Clear Cart
-- **Remove Item**: `DELETE /store/cart/items/:itemId`
-- **Clear Entire Cart**: `DELETE /store/cart/clear`
+- **Remove Single Item**: `DELETE /store/cart/items/:itemId`
+- **Clear Entire Cart**: `DELETE /store/cart`
+
+### 4.5 Fast Cart Item Counter Badge
+- **Endpoint**: `GET /store/cart/count`
+- **Access**: `CUSTOMER`
+- **Response `200 OK`**:
+```json
+{
+  "success": true,
+  "count": 3
+}
+```
+
+### 4.6 Pre-Checkout Cart Validation
+- **Endpoint**: `POST /store/cart/validate`
+- **Access**: `CUSTOMER`
+- **Purpose**: Call right before opening checkout. Verifies that all cart items remain in stock, prices have not changed, and products are active.
+- **Response `200 OK`**:
+```json
+{
+  "isValid": true,
+  "invalidItems": []
+}
+```
 
 ---
 
-## Phase 5: Customer Delivery Addresses & Profile
+## Phase 5: Customer Delivery Addresses & CRM Management
 
 ### 5.1 List Customer Saved Addresses
 - **Endpoint**: `GET /store/addresses`
@@ -453,13 +521,35 @@ The cart is tied to the customer's authenticated account and handles real-time s
 }
 ```
 
-### 5.3 Set Default Address
+### 5.3 Update Saved Address
+- **Endpoint**: `PATCH /store/addresses/:id`
+- **Access**: `CUSTOMER`
+- **Request Body**: Same schema as Create Address (partial fields accepted).
+
+### 5.4 Set Active Default Address
 - **Endpoint**: `PATCH /store/addresses/:id/set-default`
 - **Access**: `CUSTOMER`
+- **Response `200 OK`**: Sets address as primary default for 1-click checkout.
+
+### 5.5 Delete Saved Address
+- **Endpoint**: `DELETE /store/addresses/:id`
+- **Access**: `CUSTOMER`
+- **Response `200 OK`**: `{"message": "Address deleted successfully"}`
+
+### 5.6 Admin Customer CRM Management
+- **List All Customers**: `GET /customers`
+  - **Access**: `ADMIN`
+  - **Query Parameters**: `?search=...&email=...&phone=...&cellphone=...&fullName=...&status=ACTIVE&page=1&limit=20`
+  - **Response `200 OK`**: Paginated customer list with spend statistics and linked service/product orders.
+- **Get Customer Details**: `GET /customers/:id`
+  - **Access**: `ADMIN`, `CUSTOMER` (Own profile)
+- **Update Customer Profile**: `PATCH /customers/:id`
+  - **Access**: `ADMIN`, `CUSTOMER` (Own profile)
+  - **Body**: `{"displayName": "Jane Doe", "phone": "+15552345678", "notes": "VIP Client"}`
 
 ---
 
-## Phase 6: E-Commerce Orders, Checkout & Stripe Payment
+## Phase 6: E-Commerce Orders, Checkout, Returns & Invoices
 
 ### 6.1 Checkout Order from Cart
 - **Endpoint**: `POST /store/orders`
@@ -493,84 +583,79 @@ The cart is tied to the customer's authenticated account and handles real-time s
 }
 ```
 
-### 6.2 Get Customer Order History
+### 6.2 Retrieve / Regenerate Stripe Checkout Session
+- **Endpoint**: `GET /store/orders/checkout/session/:orderId`
+- **Access**: `CUSTOMER`
+- **Response `200 OK`**: `{"checkoutUrl": "https://checkout.stripe.com/...", "sessionId": "..."}`
+
+### 6.3 Stripe Webhook (Automated Payment Capture)
+- **Endpoint**: `POST /store/orders/webhook/stripe`
+- **Access**: `Public` (Verified via `stripe-signature` header)
+- **Payload**: Raw Stripe Webhook Event (`checkout.session.completed`, `payment_intent.succeeded`).
+
+### 6.4 Customer Order History
 - **Endpoint**: `GET /store/orders`
 - **Access**: `CUSTOMER`
 - **Query Parameters**: `status`, `page`, `limit`
 
-### 6.3 Get Single Order Details & Live Tracking
+### 6.5 Admin Global Order Management List
+- **Endpoint**: `GET /store/orders/admin/list`
+- **Access**: `ADMIN`
+- **Query Parameters**: `status`, `search`, `page`, `limit`, `from`, `to`
+
+### 6.6 Get Single Order Details & Live Tracking
 - **Endpoint**: `GET /store/orders/:id` (Accepts UUID or `ORD-XXXXX`)
 - **Access**: `CUSTOMER`, `ADMIN`
-- **Response `200 OK`**:
+- **Response `200 OK`**: Full order details with items, delivery address, live status history, tracking number, and invoice snapshot.
+
+### 6.7 Cancel Order (Auto-Restores Inventory Stock)
+- **Endpoint**: `PATCH /store/orders/:id/cancel`
+- **Access**: `CUSTOMER` (when `PENDING`), `ADMIN`
+- **Guarantees**: Voids unpaid invoice and restores item stock atomically. Cannot be executed if order is already `REFUNDED` or `CANCELLED`.
+
+### 6.8 Admin Unified Order Status & Tracking Update
+- **Endpoint**: `PATCH /store/orders/:id/status`
+- **Access**: `ADMIN`
+- **Request Body**:
 ```json
 {
-  "id": "ord-uuid-999",
-  "businessId": "ORD-2026-0042",
   "status": "SHIPPED",
   "shippingProvider": "UPS Ground",
   "trackingNumber": "1Z9999999999999999",
-  "placedAt": "2026-08-31T12:00:00Z",
-  "totalUsd": "971.99",
-  "items": [
-    {
-      "productName": "Elite Pro Power Unit 850AW",
-      "quantity": 1,
-      "unitPriceUsd": "899.99",
-      "totalUsd": "899.99"
-    }
-  ],
-  "statusHistory": [
-    {
-      "status": "PENDING",
-      "note": "Order placed, awaiting payment",
-      "createdAt": "2026-08-31T12:00:00Z"
-    },
-    {
-      "status": "PROCESSING",
-      "note": "Payment verified via Stripe",
-      "createdAt": "2026-08-31T12:02:15Z"
-    },
-    {
-      "status": "SHIPPED",
-      "note": "Dispatched via UPS Ground (Tracking: 1Z9999999999999999)",
-      "createdAt": "2026-08-31T14:30:00Z"
-    }
-  ],
-  "invoice": {
-    "id": "inv-uuid-11",
-    "businessId": "INV-2026-0042",
-    "status": "PAID"
-  }
+  "note": "Dispatched from central distribution hub"
 }
 ```
 
-### 6.4 Cancel Order (Auto-Restores Inventory)
-- **Endpoint**: `PATCH /store/orders/:id/cancel`
-- **Access**: `CUSTOMER` (only when `PENDING`), `ADMIN`
+### 6.9 E-Commerce Returns & Refunds
+- **Submit Return Request**: `POST /store/returns/orders/:orderId`
+  - **Access**: `CUSTOMER` (only on `DELIVERED` orders)
+  - **Body**: `{"reason": "DEFECTIVE", "customerNotes": "Power unit has an internal electrical short."}`
+- **Get Return Status**: `GET /store/returns/orders/:orderId`
+  - **Access**: `CUSTOMER`, `ADMIN`
+- **Admin Approve Return & Process Refund**: `PATCH /store/returns/orders/:orderId/refund`
+  - **Access**: `ADMIN`
+  - **Body**: `{"adminNote": "Inspection passed. Restored to inventory."}`
+  - **Guarantees**: Sets order to `REFUNDED` and restores inventory stock safely.
+
+### 6.10 E-Commerce Invoices & PDF Downloads
+- **Get Invoice**: `GET /store/invoices/orders/:orderId` (`CUSTOMER`, `ADMIN`)
+- **Generate Invoice PDF**: `POST /store/invoices/orders/:orderId/generate` (`CUSTOMER`, `ADMIN`)
+- **Direct PDF Download**: `GET /store/invoices/orders/:orderId/download` (`CUSTOMER`, `ADMIN`)
 
 ---
 
 ## Phase 7: Central Vacuum Services Catalog & Scheduling
 
-### 7.1 List Available Services
+### 7.1 List Categorized Services
 - **Endpoint**: `GET /services`
 - **Access**: `Public`
-- **Response `200 OK`**:
-```json
-[
-  {
-    "id": "srv-01",
-    "name": "Central Vacuum Clog & Pipe Repair",
-    "slug": "clog-pipe-repair",
-    "description": "High-pressure diagnostic reverse flush and acoustic pipe locator.",
-    "basePriceUsd": "149.00",
-    "durationMinutes": 60,
-    "commonSymptoms": ["LOW_SUCTION", "CLOGGED_PIPE", "WHISTLING_NOISE"]
-  }
-]
-```
+- **Response `200 OK`**: Returns fixed service offerings grouped into `SERVICE_AND_MAINTENANCE` and `INSTALLATION` with symptom checklists and baseline pricing.
 
-### 7.2 Check Available Booking Slots
+### 7.2 Get Service Details by Slug
+- **Endpoint**: `GET /services/:slug` (e.g. `/services/vacuum-repair`)
+- **Access**: `Public`
+
+### 7.3 Check Available Booking Slots (Real-Time Slot Engine)
 - **Endpoint**: `GET /schedule/slots`
 - **Access**: `Public` / `CUSTOMER`
 - **Query Parameters**: `date=YYYY-MM-DD` (e.g. `?date=2026-09-15`)
@@ -580,28 +665,59 @@ The cart is tied to the customer's authenticated account and handles real-time s
   "date": "2026-09-15",
   "slots": [
     {
-      "timeWindow": "08:00 AM - 10:00 AM",
-      "available": true,
-      "remainingCapacity": 3
+      "timeWindow": "09:00 AM - 11:00 AM",
+      "startTime": "09:00",
+      "endTime": "11:00",
+      "isBooked": false,
+      "status": "FREE"
     },
     {
-      "timeWindow": "10:00 AM - 12:00 PM",
-      "available": true,
-      "remainingCapacity": 2
-    },
-    {
-      "timeWindow": "01:00 PM - 03:00 PM",
-      "available": false,
-      "remainingCapacity": 0
-    },
-    {
-      "timeWindow": "03:00 PM - 05:00 PM",
-      "available": true,
-      "remainingCapacity": 1
+      "timeWindow": "11:00 AM - 01:00 PM",
+      "startTime": "11:00",
+      "endTime": "13:00",
+      "isBooked": true,
+      "status": "BOOKED"
     }
   ]
 }
 ```
+
+### 7.4 Admin Dispatch Board Overview Calendar
+- **Endpoint**: `GET /schedule/board`
+- **Access**: `ADMIN`
+- **Query Parameters**: `startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&technicianId=...`
+- **Response `200 OK`**: Calendar view mapping appointments across all field technicians with aggregate dispatch metrics.
+
+### 7.5 Admin Create Appointment (Redlock Protected)
+- **Endpoint**: `POST /schedule`
+- **Access**: `ADMIN`
+- **Concurrency**: Thread-safe with Redis lock (`lock:schedule:${techId}:${date}:${startTime}`)
+- **Request Body**:
+```json
+{
+  "serviceRequestId": "req-uuid-01",
+  "technicianId": "tech-uuid-05",
+  "date": "2026-09-15",
+  "startTime": "09:00",
+  "endTime": "11:00",
+  "notes": "Gate code #4321"
+}
+```
+
+### 7.6 Admin Reschedule or Update Appointment
+- **Endpoint**: `PATCH /schedule/:appointmentId`
+- **Access**: `ADMIN`
+- **Body**: `{"date": "2026-09-16", "startTime": "13:00", "endTime": "15:00"}`
+
+### 7.7 Admin Assign / Reassign Technician
+- **Endpoint**: `POST /schedule/:appointmentId/assign`
+- **Access**: `ADMIN`
+- **Body**: `{"technicianId": "tech-uuid-02"}`
+
+### 7.8 Admin Cancel Appointment
+- **Endpoint**: `POST /schedule/:appointmentId/cancel`
+- **Access**: `ADMIN`
+- **Body**: `{"reason": "Customer requested cancellation"}`
 
 ---
 
@@ -612,10 +728,10 @@ The cart is tied to the customer's authenticated account and handles real-time s
 - **Access**: `CUSTOMER` (Mandatory JWT auth)
 - **Content-Type**: `multipart/form-data`
 - **Fields**:
-  - `data` *(stringified JSON)*:
+  - `data` *(stringified JSON of CreateServiceRequestDto)*:
     ```json
     {
-      "serviceSlug": "clog-pipe-repair",
+      "serviceSlug": "vacuum-repair",
       "fullName": "Jane Doe",
       "phone": "+15552345678",
       "address": "742 Evergreen Terrace",
@@ -632,32 +748,54 @@ The cart is tied to the customer's authenticated account and handles real-time s
       "unitLocation": "Garage"
     }
     ```
-  - `attachments`: File uploads (Photos/Videos/Inlet photos).
-- **Response `201 Created`**:
-```json
-{
-  "success": true,
-  "message": "Service intake request created and booked for review",
-  "request": {
-    "id": "req-uuid-001",
-    "businessId": "REQ-2026-0089",
-    "status": "SUBMITTED",
-    "preferredDate": "2026-09-15",
-    "preferredTime": "10:00 AM - 12:00 PM"
-  }
-}
-```
+  - `attachments`: File uploads (Photos/Videos/Inlet photos directly uploaded to Cloudinary).
+- **Response `201 Created`**: Returns created request with generated `businessId` (e.g. `REQ-2026-0089`).
 
 ### 8.2 Customer Service Requests History
 - **Endpoint**: `GET /service-requests/me`
 - **Access**: `CUSTOMER`
+- **Query Parameters**: `status`, `page`, `limit`
+
+### 8.3 Admin Triage & KPI Search List
+- **Endpoint**: `GET /service-requests`
+- **Access**: `ADMIN`
+- **Query Parameters**: `search`, `status`, `urgency`, `page`, `limit`
+- **Response `200 OK`**: Paginated list + KPI counts (`submitted`, `underReview`, `quoted`, `accepted`, `scheduled`, `rejected`).
+
+### 8.4 Get Service Request Details
+- **Endpoint**: `GET /service-requests/:id` (Accepts UUID or `REQ-XXXXX`)
+- **Access**: `CUSTOMER`, `ADMIN`, `TECHNICIAN`
+
+### 8.5 Admin Update Service Request Status
+- **Endpoint**: `PATCH /service-requests/:id/status`
+- **Access**: `ADMIN`
+- **Body**: `{"status": "UNDER_REVIEW", "adminNote": "Assigned diagnostic checklist to tech team"}`
+
+### 8.6 Admin Reject Service Request
+- **Endpoint**: `POST /service-requests/:id/reject`
+- **Access**: `ADMIN`
+- **Body**: `{"reason": "OUT_OF_SERVICE_AREA", "comments": "Property located outside our 50-mile operating radius."}`
+
+### 8.7 Append Attachments to Active Request
+- **Endpoint**: `POST /service-requests/:id/attachments`
+- **Access**: `CUSTOMER`, `ADMIN`
+- **Content-Type**: `multipart/form-data` with `attachments` files.
 
 ---
 
 ## Phase 9: Quotations & Customer Approval
 
-### 9.1 View Received Quotation
-- **Endpoint**: `GET /quotations/:id` (UUID or `QUO-XXXXX`)
+### 9.1 Admin List Quotations with KPIs
+- **Endpoint**: `GET /quotations`
+- **Access**: `ADMIN`
+- **Query Parameters**: `status`, `search`, `page`, `limit`
+
+### 9.2 Customer List Own Received Quotations
+- **Endpoint**: `GET /quotations/me`
+- **Access**: `CUSTOMER`
+
+### 9.3 View Quotation Details
+- **Endpoint**: `GET /quotations/:id` (Accepts UUID or `QUO-XXXXX`)
 - **Access**: `CUSTOMER`, `ADMIN`
 - **Response `200 OK`**:
 ```json
@@ -686,9 +824,33 @@ The cart is tied to the customer's authenticated account and handles real-time s
 }
 ```
 
-### 9.2 Accept Quotation (Auto-Provisions Service Order)
-- **Endpoint**: `POST /quotations/:id/accept`
+### 9.4 Admin Create Itemized Quotation
+- **Endpoint**: `POST /quotations`
+- **Access**: `ADMIN`
+- **Request Body**:
+```json
+{
+  "serviceRequestId": "req-uuid-01",
+  "lineItems": [
+    { "description": "Motor diagnostic & replacement", "quantity": 1, "unitPriceUsd": 250 },
+    { "description": "HEPA Filter Core", "quantity": 1, "unitPriceUsd": 45 }
+  ],
+  "discountUsd": 15,
+  "taxUsd": 22.40,
+  "notes": "Estimated 2 hours on site"
+}
+```
+*(Automatically transitions service request to `QUOTED` and dispatches notification email to customer)*
+
+### 9.5 Admin Revise Quotation (Snapshot Capture)
+- **Endpoint**: `PATCH /quotations/:id`
+- **Access**: `ADMIN`
+- **Body**: Update line items, totals, or revision reason. Creates a new version and captures immutable revision snapshot into `QuotationRevision`.
+
+### 9.6 Customer Accept Quotation (Auto-Provisions Service Order)
+- **Endpoint**: `POST /quotations/:id/accept` (or `PATCH /quotations/:id/status` with `{"action": "ACCEPT"}`)
 - **Access**: `CUSTOMER`
+- **Concurrency**: Thread-safe with Redis lock (`quotation:action:${id}`).
 - **Response `200 OK`**:
 ```json
 {
@@ -703,21 +865,25 @@ The cart is tied to the customer's authenticated account and handles real-time s
 }
 ```
 
-### 9.3 Reject Quotation
-- **Endpoint**: `POST /quotations/:id/reject`
+### 9.7 Customer Reject Quotation
+- **Endpoint**: `POST /quotations/:id/reject` (or `PATCH /quotations/:id/status` with `{"action": "REJECT", "rejectionReason": "..."}`)
 - **Access**: `CUSTOMER`
-- **Request Body**:
-```json
-{
-  "reason": "Price is higher than expected. Would like to proceed with pipe flush only."
-}
-```
+- **Body**: `{"reason": "Price is higher than expected."}`
 
 ---
 
 ## Phase 10: Service Orders & Technician Dispatch
 
-### 10.1 Customer View Service Order Timeline & ETA
+### 10.1 Admin List Service Orders with KPIs
+- **Endpoint**: `GET /service-orders`
+- **Access**: `ADMIN`
+- **Query Parameters**: `status`, `search`, `page`, `limit`
+
+### 10.2 Customer List Own Service Orders
+- **Endpoint**: `GET /service-orders/me`
+- **Access**: `CUSTOMER`
+
+### 10.3 Customer View Service Order Timeline & ETA
 - **Endpoint**: `GET /service-orders/:id`
 - **Access**: `CUSTOMER`, `ADMIN`, `TECHNICIAN`
 - **Response `200 OK`**:
@@ -743,7 +909,15 @@ The cart is tied to the customer's authenticated account and handles real-time s
 }
 ```
 
-### 10.2 Technician / Admin Update Status
+### 10.4 Admin Create Service Order Directly
+- **Endpoint**: `POST /service-orders`
+- **Access**: `ADMIN`
+
+### 10.5 Admin Edit Service Order Details
+- **Endpoint**: `PATCH /service-orders/:id`
+- **Access**: `ADMIN`
+
+### 10.6 Technician / Admin Update Status
 - **Endpoint**: `PATCH /service-orders/:id/status`
 - **Access**: `TECHNICIAN`, `ADMIN`
 - **Request Body**:
@@ -754,6 +928,16 @@ The cart is tied to the customer's authenticated account and handles real-time s
 }
 ```
 *(Status workflow: `SCHEDULED` $\rightarrow$ `TECHNICIAN_ASSIGNED` $\rightarrow$ `ON_THE_WAY` $\rightarrow$ `ARRIVED` $\rightarrow$ `IN_PROGRESS` $\rightarrow$ `COMPLETED` $\rightarrow$ `CANCELLED`)*
+
+### 10.7 Admin Assign / Reassign Technician
+- **Endpoint**: `POST /service-orders/:id/assign`
+- **Access**: `ADMIN`
+- **Body**: `{"technicianId": "tech-uuid-01"}`
+
+### 10.8 Technician / Admin Live ETA Update
+- **Endpoint**: `POST /service-orders/:id/eta`
+- **Access**: `TECHNICIAN`, `ADMIN`
+- **Body**: `{"minutes": 20, "note": "En route, slight highway delay"}`
 
 ---
 
@@ -781,30 +965,64 @@ socket.on('notification:new', (notification) => {
   updateUnreadBadgeCount((prev) => prev + 1);
 });
 
-// Listen for read-all broadcasts
-socket.on('notification:read_all', () => {
-  updateUnreadBadgeCount(0);
+// Listen for unread count badge updates
+socket.on('notification:unread_count', (payload) => {
+  console.log('Unread count updated:', payload.unreadCount);
 });
 ```
 
 ### 11.2 Notifications REST Endpoints
-| Action | Method | Route | Description |
-| :--- | :--- | :--- | :--- |
-| **Get Inbox** | `GET` | `/notifications` | Paginated notifications with `isRead` filter |
-| **Fast Unread Count** | `GET` | `/notifications/unread-count` | Returns `{"unreadCount": 3}` for badge header |
-| **Mark Single Read** | `PATCH` | `/notifications/:id/read` | Marks notification as read |
-| **Mark All Read** | `PATCH` | `/notifications/read-all` | Marks all as read & broadcasts via WSS |
-| **Delete** | `DELETE` | `/notifications/:id` | Removes from inbox |
+| Action | Method | Route | Access | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **Get Inbox** | `GET` | `/notifications` | Auth | Paginated notifications with `isRead` & `type` filter |
+| **Fast Unread Count** | `GET` | `/notifications/unread-count` | Auth | Returns `{"unreadCount": 3}` for badge header |
+| **Get Preferences** | `GET` | `/notifications/preferences` | Auth | User email, SMS, push toggle settings |
+| **Update Preferences** | `PATCH` | `/notifications/preferences` | Auth | Update notification delivery preferences |
+| **Admin Enqueue** | `POST` | `/notifications` | `ADMIN` | Dispatches notification via BullMQ worker queue |
+| **Mark Single Read** | `PATCH` | `/notifications/:id/read` | Auth | Marks notification as read |
+| **Mark All Read** | `PATCH` | `/notifications/read-all` | Auth | Marks all as read & broadcasts via WSS |
+| **Delete** | `DELETE` | `/notifications/:id` | Auth | Removes from inbox |
 
 ---
 
 ## Phase 12: Invoicing, Payments & Refunds
 
-### 12.1 Get Invoices List
+### 12.1 Admin List Invoices with KPIs
+- **Endpoint**: `GET /billing/invoices`
+- **Access**: `ADMIN`
+- **Query Parameters**: `status`, `search`, `page`, `limit`
+
+### 12.2 Customer List Own Invoices
 - **Endpoint**: `GET /billing/invoices/me`
 - **Access**: `CUSTOMER`
 
-### 12.2 Pay Invoice via Stripe (Online Card / Apple Pay)
+### 12.3 Get Single Invoice Details
+- **Endpoint**: `GET /billing/invoices/:id` (Accepts UUID or `INV-XXXXX`)
+- **Access**: `CUSTOMER`, `ADMIN`
+
+### 12.4 View Printable HTML Invoice
+- **Endpoint**: `GET /billing/invoices/:id/html`
+- **Access**: `CUSTOMER`, `ADMIN` (Returns formatted HTML ready for printing or browser PDF save)
+
+### 12.5 Admin Create Custom or Service Invoice
+- **Endpoint**: `POST /billing/invoices`
+- **Access**: `ADMIN`
+
+### 12.6 Admin Edit Invoice Details
+- **Endpoint**: `PATCH /billing/invoices/:id`
+- **Access**: `ADMIN`
+
+### 12.7 Admin Record Offline Payment
+- **Endpoint**: `POST /billing/invoices/:id/payments`
+- **Access**: `ADMIN`
+- **Body**: `{"amountUsd": 216.00, "method": "CASH", "reference": "Cash received on site"}`
+
+### 12.8 Admin Record Refund
+- **Endpoint**: `POST /billing/invoices/:id/refunds`
+- **Access**: `ADMIN`
+- **Body**: `{"paymentId": "pay-uuid-01", "amountUsd": 50.00, "reason": "Goodwill discount adjustment"}`
+
+### 12.9 Pay Invoice via Stripe (Online Card / Apple Pay)
 - **Step 1 — Create Stripe PaymentIntent**:
   - `POST /billing/invoices/:id/stripe/payment-intent`
   - Returns: `{"clientSecret": "pi_3MtwBwLkdIwHu7ix28a3tqPa_secret_..."}`
@@ -814,10 +1032,6 @@ socket.on('notification:read_all', () => {
   - `POST /billing/invoices/:id/stripe/confirm`
   - Body: `{"paymentIntentId": "pi_3MtwBwLkdIwHu7ix28a3tqPa"}`
   - Automatically marks invoice `PAID` and sends receipt email.
-
-### 12.3 View Printable HTML Invoice
-- **Endpoint**: `GET /billing/invoices/:id/html`
-- **Access**: `CUSTOMER`, `ADMIN` (Returns formatted HTML ready for printing or PDF save)
 
 ---
 
@@ -849,7 +1063,11 @@ socket.on('notification:read_all', () => {
 }
 ```
 
-### 13.2 Submit Review
+### 13.2 Customer List Submitted Reviews
+- **Endpoint**: `GET /reviews/me`
+- **Access**: `CUSTOMER`
+
+### 13.3 Submit Review (for Service or Product Order)
 - **Endpoint**: `POST /reviews`
 - **Access**: `CUSTOMER`
 - **Request Body**:
@@ -862,11 +1080,25 @@ socket.on('notification:read_all', () => {
 }
 ```
 
+### 13.4 Admin List All Reviews with Moderation Controls
+- **Endpoint**: `GET /reviews/admin/all`
+- **Access**: `ADMIN`
+- **Query Parameters**: `status` (`PENDING`, `PUBLISHED`, `REJECTED`, `HIDDEN`), `search`, `page`, `limit`
+
+### 13.5 Admin Moderate Review
+- **Endpoint**: `PATCH /reviews/:id/moderate`
+- **Access**: `ADMIN`
+- **Body**: `{"status": "PUBLISHED"}`
+
+### 13.6 Admin Delete Review
+- **Endpoint**: `DELETE /reviews/:id`
+- **Access**: `ADMIN`
+
 ---
 
 ## Phase 14: Analytics, System Settings & AI Assistant
 
-### 14.1 Stream AI Assistant (Gemini 2.5)
+### 14.1 Stream AI Assistant (Gemini 2.5 Flash SSE)
 - **Endpoint**: `POST /ai/chat/stream`
 - **Access**: `Authenticated` (`CUSTOMER`, `ADMIN`, `TECHNICIAN`)
 - **Content-Type**: `text/event-stream` (Server-Sent Events)
@@ -877,10 +1109,33 @@ socket.on('notification:read_all', () => {
 }
 ```
 
-### 14.2 Public Business Profile & FAQs
-- `GET /settings/business-profile` — Contact info, service coverage notes, operating hours.
-- `GET /settings/faqs` — Frequently asked questions grouped by categories.
-- `GET /settings/policies` — Shipping, Return, and Warranty policies.
+### 14.2 Non-Streaming AI Prompt
+- **Endpoint**: `POST /ai/chat`
+- **Access**: `Authenticated`
+- **Request Body**: `{"message": "How often should I change central vac filters?"}`
+
+### 14.3 AI Problem Diagnostic Extraction
+- **Endpoint**: `POST /ai/service-intake`
+- **Access**: `CUSTOMER`, `ADMIN`
+- **Request Body**: `{"message": "Our Beam central vacuum in the basement is making a whistling noise and won't turn on upstairs."}`
+- **Response `200 OK`**: Returns structured JSON with identified symptoms, potential cause, and recommended service.
+
+### 14.4 Public & Admin Business Profile
+- `GET /settings/business-profile` — Public contact info, service coverage notes, operating hours.
+- `PATCH /settings/business-profile` — Admin update business details.
+
+### 14.5 FAQs Management
+- `GET /settings/faqs` — Public FAQs grouped by category.
+- `POST /settings/faqs` — Admin create FAQ.
+- `PATCH /settings/faqs/:id` — Admin edit FAQ.
+- `DELETE /settings/faqs/:id` — Admin delete FAQ.
+
+### 14.6 Legal Policies Management
+- `GET /settings/policies` — Public list of all legal policies.
+- `GET /settings/policies/:slug` — Public get policy by slug (e.g. `terms`, `privacy`, `warranty`).
+- `POST /settings/policies` — Admin create policy.
+- `PATCH /settings/policies/:id` — Admin update policy.
+- `DELETE /settings/policies/:id` — Admin delete policy.
 
 ---
 
@@ -888,48 +1143,29 @@ socket.on('notification:read_all', () => {
 
 The backend provides direct streaming CSV download endpoints for administrative reporting. Headers include standard `Content-Disposition: attachment; filename="..."` and `Content-Type: text/csv`.
 
-### 15.1 Export Orders Report (CSV)
+### 15.1 Executive KPI Dashboards
+- `GET /reports/overview` — Revenue over time, service request funnel, product sales.
+- `GET /reports/sales` — Sales volume, top selling products, average order value.
+- `GET /reports/service-operations` — Intake volume, top requested services.
+- `GET /reports/technicians` — Technician leaderboard, customer ratings, completed jobs.
+- `GET /reports/customers` — Customer growth, active customer count, repeat rate.
+
+### 15.2 Export Orders Report (CSV)
 - **Endpoint**: `GET /reports/export/orders/csv`
 - **Access**: `ADMIN`
-- **Query Parameters**:
-  - `period`: `7d` | `30d` | `90d` | `1y`
-  - `from`: `YYYY-MM-DD`
-  - `to`: `YYYY-MM-DD`
-- **Headers Returned**:
-  ```http
-  Content-Type: text/csv
-  Content-Disposition: attachment; filename="orders_report.csv"
-  ```
-- **Example Frontend Trigger (Blob Download)**:
-  ```typescript
-  const downloadOrdersCsv = async () => {
-    const response = await apiClient.get('/reports/export/orders/csv', {
-      responseType: 'blob',
-    });
-    const url = window.URL.createObjectURL(new Blob([response.data]));
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', 'orders_report.csv');
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-  };
-  ```
+- **Query Parameters**: `period` (`7d`, `30d`, `90d`, `1y`), `from`, `to`
 
-### 15.2 Export Service Requests Report (CSV)
+### 15.3 Export Service Requests Report (CSV)
 - **Endpoint**: `GET /reports/export/service-requests/csv`
 - **Access**: `ADMIN`
-- **Columns**: `Request ID, Business ID, Customer Name, Customer Email, Service Name, Status, Urgency, Preferred Date, Preferred Time, City / State, Submitted At`
 
-### 15.3 Export Customers Report (CSV)
+### 15.4 Export Customers CRM Report (CSV)
 - **Endpoint**: `GET /reports/export/customers/csv`
 - **Access**: `ADMIN`
-- **Columns**: `Customer ID, Display Name, Email, Phone, Cellphone, Company, Status, Product Orders Count, Service Orders Count, Total Product Spend (USD), Total Service Spend (USD), Joined At`
 
-### 15.4 Export Invoices Report (CSV)
+### 15.5 Export Invoices Report (CSV)
 - **Endpoint**: `GET /reports/export/invoices/csv`
 - **Access**: `ADMIN`
-- **Columns**: `Invoice ID, Business ID, Customer Name, Customer Email, Status, Subtotal (USD), Tax (USD), Discount (USD), Total (USD), Due Date, Created At`
 
 ---
 
@@ -1484,6 +1720,56 @@ graph LR
 
 ---
 
+### 17.7 Admin Technician Management CRUD
+
+Admin dispatchers have full CRUD control over the field technician workforce.
+
+#### 1. List Technicians
+- **Endpoint**: `GET /technicians`
+- **Access**: `ADMIN`
+- **Query Parameters**: `?search=...&status=ACTIVE&availability=AVAILABLE&page=1&limit=20`
+- **Response `200 OK`**: Paginated technician list with performance KPIs and assignment counts.
+
+#### 2. Get Technician Details
+- **Endpoint**: `GET /technicians/:id`
+- **Access**: `ADMIN`
+
+#### 3. Create Technician Account
+- **Endpoint**: `POST /technicians`
+- **Access**: `ADMIN`
+- **Request Body**:
+```json
+{
+  "email": "technician@elitevacuum.com",
+  "password": "TemporaryPassword123!",
+  "firstName": "Alex",
+  "lastName": "Rivera",
+  "phone": "+1 555-0188",
+  "specializations": ["Central Vacuum Installation", "Pipe Unclogging"],
+  "bio": "Certified central vac installer with 8+ years experience."
+}
+```
+
+#### 4. Update Technician Details
+- **Endpoint**: `PATCH /technicians/:id`
+- **Access**: `ADMIN`
+- **Request Body**:
+```json
+{
+  "displayName": "Alex Rivera, Lead Tech",
+  "phone": "+1 555-0189",
+  "status": "ACTIVE",
+  "specializations": ["Installation", "Clog Repair", "Motor Diagnostics"]
+}
+```
+
+#### 5. Delete / Deactivate Technician
+- **Endpoint**: `DELETE /technicians/:id`
+- **Access**: `ADMIN`
+- **Response `200 OK`**: `{"message": "Technician deleted successfully"}`
+
+---
+
 ## 🎯 Summary Checklist for Frontend Teams
 
 | Step | Feature Domain | Status | Key Component to Build |
@@ -1492,8 +1778,8 @@ graph LR
 | **Phase 2** | Categories | Ready | Mega Menu & Category Navigation Grid |
 | **Phase 3** | Products Catalog | Ready | Product Grid, Filter Sidebar, Product Page |
 | **Phase 4** | Shopping Cart | Ready | Slide-Over Cart Drawer & Summary Card |
-| **Phase 5** | Addresses & Profile | Ready | Address Book Modal & Default Selector |
-| **Phase 6** | Checkout & Orders | Ready | Stripe Checkout Redirect & Order Tracking Page |
+| **Phase 5** | Addresses & CRM | Ready | Address Book Modal & Admin Customer CRM |
+| **Phase 6** | Checkout, Orders, Returns | Ready | Stripe Checkout, Order Tracking & RMA Modal |
 | **Phase 7** | Services & Slots | Ready | Service Booking Wizard & Slot Picker |
 | **Phase 8** | Service Intake | Ready | Multi-step Intake Form with Photo Upload |
 | **Phase 9** | Quotations | Ready | Itemized Quote Review & Accept/Reject Modal |
@@ -1504,6 +1790,6 @@ graph LR
 | **Phase 14** | AI & Settings | Ready | Floating AI Support Chatbot & Policy Pages |
 | **Phase 15** | CSV Reports & Export | Ready | One-Click CSV Export Action Buttons in Admin Panel |
 | **Phase 16** | Live Support Chat | Ready | Floating Customer Chat Drawer & Admin Live Inbox |
-| **Phase 17** | Technician Field Portal | Ready | 5-Screen Mobile-Responsive Field App & Status Transitions |
+| **Phase 17** | Technician Field Portal | Ready | 5-Screen Mobile-Responsive Field App & Admin Tech CRUD |
 
 

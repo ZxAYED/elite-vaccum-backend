@@ -20,18 +20,64 @@
 </p>
 
 <p align="center">
+  <a href="#-production-engineering-highlights--architecture-innovations">Engineering Highlights</a> &bull;
   <a href="#-system-architecture">Architecture</a> &bull;
-  <a href="#-frontend-api-integration-guide">API Integration Guide</a> &bull;
-  <a href="#-key-capabilities">Key Features</a> &bull;
-  <a href="#-module-breakdown">Modules</a> &bull;
-  <a href="#-real-time-notifications--websocket">Notifications & WebSockets</a> &bull;
-  <a href="#-redis--concurrency-architecture">Redis & Concurrency</a> &bull;
+  <a href="#-frontend-api-integration-guide">API Guide (17 Phases)</a> &bull;
+  <a href="#-role-based-workflow-architecture-admin-vs-customer-vs-technician">Role Workflows</a> &bull;
+  <a href="#-real-time-notifications--websocket">WebSockets</a> &bull;
+  <a href="#-redis--concurrency-architecture">Redis Concurrency</a> &bull;
   <a href="#-quick-start">Quick Start</a>
 </p>
 
 ---
 
 </div>
+
+## ⚡ Production Engineering Highlights & Architecture Innovations
+
+> **Engineered for High-Scale Enterprise Reliability, Zero-Race-Condition Concurrency, Real-Time Distributed Mesh, and Strict Security.**
+
+### 🏆 1. Distributed Concurrency & Zero-Race-Condition Guarantees
+- **Redlock Distributed Locking (`RedisService.acquireLock`)**: Serializes critical operations to prevent double-booking concurrent slot requests (`lock:schedule:${techId}:${date}:${startTime}`), payment double-settlements (`payment:invoice:${id}`), and atomic quotation sign-offs (`quotation:action:${id}`).
+- **Stock Double-Restoration Prevention**: Strict pre-condition validation in both `cancelOrder` and `processReturnRefund` preventing double-increment of inventory stock when managing refunded or cancelled orders.
+- **ACID Transaction Isolation**: All multi-table side-effects (e.g. quotation acceptance auto-provisioning `ServiceOrder` + `Appointment` + `StatusHistory`) execute within unified Prisma `$transaction` blocks.
+
+### 🛡️ 2. Multi-Tier Anti-Brute-Force & Rate Limiting Security
+- **Granular Endpoint Throttling**: `@nestjs/throttler` protects sensitive entrypoints against automated brute-force attacks:
+  - `POST /auth/verify-otp`, `POST /auth/resend-otp`: **5 req/min**
+  - `POST /auth/login`: **10 req/min**
+  - `POST /auth/forgot-password`, `POST /auth/reset-password`: **5 req/min**
+  - Global API Limiting: Layered **15 req/sec**, **60 req/10s**, and **200 req/min**.
+- **Secure HttpOnly Cookie Token Rotation**: Refresh tokens are isolated from client-side JavaScript in encrypted `HttpOnly`, `SameSite: Lax/None`, `Secure` cookies with automatic session revocation.
+- **Data Integrity & Address Ownership Guards**: Prevents customer address tampering during checkout by enforcing strict customer ID ownership verification before order creation.
+
+### 📡 3. Real-Time Distributed WebSocket Mesh & Redis Pub/Sub
+- **Dual WebSocket Gateways**: Real-time channels for **In-App Notifications** (`/notifications`) and **Live Support Chat** (`/chat`) built with Socket.io.
+- **Horizontal Multi-Node Clustering**: Sockets synchronize across multiple backend container nodes via Redis Pub/Sub channels (`notifications:events`, `chat:messages`, `chat:typing`) with `<10ms` broadcast latency.
+- **Zero-Memory-Leak Presence Tracker (`RedisPresenceService`)**: Maintains active socket device sets in Redis (`presence:devices:<userId>`), allowing instant online/offline checks without server memory buildup.
+
+### 📬 4. Resilient Asynchronous Processing with BullMQ
+- **Background Worker Queues**: Dedicated BullMQ queues (`notifications-delivery`, `chat-messages`) with worker concurrency, exponential backoff retries, and rate limiting (25 jobs/sec).
+- **Intelligent Offline Chat Debouncing**: Delayed 2-minute BullMQ job checks whether the recipient read a message; if offline, dispatches formatted HTML email alerts via SMTP.
+- **Centralized Connection Pool**: High-performance connection factory (`createBullMQRedisConnection`) handling Upstash TLS, `maxRetriesPerRequest: null`, and automatic error recovery.
+
+### 👥 5. Single Unified Authentication & 3-Role Domain Routing
+- **One Unified Auth System**: Single entrypoint (`POST /auth/login`) handles `CUSTOMER`, `ADMIN`, and `TECHNICIAN` roles without duplicate authentication silos or session conflicts.
+- **Role-Based Guards**: Method-level `@Roles('ADMIN')`, `@Roles('TECHNICIAN')`, and `@Roles('CUSTOMER')` decorators ensure granular endpoint authorization.
+
+### 📂 6. Modular Multi-File Prisma Schema Architecture
+- **Domain-Driven Schemas**: 14 cleanly partitioned Prisma schema files (`schema.prisma`, `auth.prisma`, `customer.prisma`, `store.prisma`, `services.prisma`, `technician.prisma`, `chat.prisma`, `reviews.prisma`, etc.) merged automatically during build, ensuring clean separation of concerns in PostgreSQL.
+
+### 🚀 7. Direct Buffer Media Streaming & CSV Export Pipeline
+- **Zero-Disk Media Processing**: Multipart image/video attachments stream directly from memory buffers to Cloudinary CDN without temporary file disk I/O bottlenecks.
+- **Streaming CSV Export**: High-performance streaming CSV downloads for Orders, Service Requests, Customers, and Invoices with instant HTTP response headers.
+
+### 🤖 8. Generative AI Diagnostic Engine (Google Gemini Flash)
+- **Real-Time Streaming SSE**: Streaming chat completion over Server-Sent Events (`POST /ai/chat/stream`).
+- **Structured Symptom Extraction**: Natural language intake analysis extracting symptoms (`LOW_SUCTION`, `CLOG`, `ODOR`) and urgency scores using structured output schemas.
+- **Live Database Tool Integration**: Tool calling integrated with real-time Prisma DB queries (services, products, orders) with automatic fallback.
+
+---
 
 ## 🌟 Executive Overview
 
@@ -383,25 +429,28 @@ npm run test:e2e
 
 For the full phase-by-phase frontend integration roadmap covering all 14 feature domains with exact schemas, example payloads, error codes, and frontend recipes:
 
-👉 **[Complete Phase-by-Phase Frontend API Integration Guide (14 Phases)](./docs/API_INTEGRATION_GUIDE.md)**
+👉 **[Complete Phase-by-Phase Frontend API Integration Guide (17 Phases)](./docs/API_INTEGRATION_GUIDE.md)**
 
 | Phase | Feature Domain | Status | Description |
 | :--- | :--- | :--- | :--- |
 | **Phase 0** | Global Architecture & Client Setup | ✅ Ready | Axios interceptor, Base URLs, HttpOnly cookies, pagination |
-| **Phase 1** | Authentication & User Accounts | ✅ Ready | Register, Email OTP, Login, `/auth/me`, Password Reset |
-| **Phase 2** | Categories & Taxonomy | ✅ Ready | Category hierarchy with active product counters |
-| **Phase 3** | Products Catalog & Search | ✅ Ready | Multi-attribute search, filter, sort, and image upload |
-| **Phase 4** | Shopping Cart Management | ✅ Ready | Live price recalculation, stock checks, free shipping threshold |
-| **Phase 5** | Saved Delivery Addresses | ✅ Ready | Address book CRUD, default delivery address selection |
-| **Phase 6** | E-Commerce Orders & Checkout | ✅ Ready | Stripe Checkout Session, COD, live tracking timeline |
-| **Phase 7** | Services Catalog & Scheduling | ✅ Ready | Service offerings, dynamic slot availability engine |
-| **Phase 8** | Service Intake Requests | ✅ Ready | Multi-step intake with symptom tags & media attachments |
-| **Phase 9** | Quotations & Customer Approval | ✅ Ready | Itemized estimates, atomic Accept/Reject with Redis locks |
-| **Phase 10** | Service Orders & Field Dispatch | ✅ Ready | Technician assignment, live ETA updates, completion reports |
-| **Phase 11** | Real-Time Notifications & WSS | ✅ Ready | WebSocket Gateway, BullMQ delivery, unread badge counter |
-| **Phase 12** | Invoicing, Payments & Refunds | ✅ Ready | Multi-line invoices, Stripe PaymentIntent, printable HTML |
-| **Phase 13** | Customer Reviews & Ratings | ✅ Ready | Verified customer reviews, 5-star rating aggregates |
-| **Phase 14** | Analytics, Settings & AI Assistant | ✅ Ready | Executive KPI reports, FAQs, policies, Gemini SSE stream |
+| **Phase 1** | Authentication & User Accounts | ✅ Ready | Register, Rate-limited Email OTP, Login, `/auth/me`, Password Reset |
+| **Phase 2** | Categories & Taxonomy | ✅ Ready | Category hierarchy with active product counters & admin CRUD |
+| **Phase 3** | Products Catalog & Search | ✅ Ready | Multi-attribute search, filters, Cloudinary upload & admin product management |
+| **Phase 4** | Shopping Cart Management | ✅ Ready | Live price recalculation, stock checks, free shipping threshold & pre-checkout validation |
+| **Phase 5** | Saved Delivery Addresses & Customers | ✅ Ready | Address book CRUD, default selector & Admin customer CRM management |
+| **Phase 6** | E-Commerce Orders, Checkout & Returns | ✅ Ready | Stripe Checkout Session, COD, live tracking timeline, returns & auto-restock |
+| **Phase 7** | Services Catalog & Scheduling | ✅ Ready | Service offerings, dynamic slot availability engine & Redlock appointment booking |
+| **Phase 8** | Service Intake Requests | ✅ Ready | Multi-step intake with symptom tags, direct Cloudinary attachments & admin triage |
+| **Phase 9** | Quotations & Customer Approval | ✅ Ready | Itemized estimates, revision history, customer Accept/Reject with Redis locks |
+| **Phase 10** | Service Orders & Field Dispatch | ✅ Ready | Technician assignment, live ETA updates, status transitions & completion reports |
+| **Phase 11** | Real-Time Notifications & WSS | ✅ Ready | WebSocket Gateway, BullMQ delivery, unread badge counter & preferences |
+| **Phase 12** | Invoicing, Payments & Refunds | ✅ Ready | Multi-line invoices, Stripe PaymentIntent, printable HTML & payment ledger |
+| **Phase 13** | Customer Reviews & Ratings | ✅ Ready | Verified customer reviews, 5-star rating aggregates & admin moderation |
+| **Phase 14** | Analytics, Settings & AI Assistant | ✅ Ready | Business profile, FAQs, policies & Gemini 1.5 SSE streaming assistant |
+| **Phase 15** | CSV Data Export & Reporting | ✅ Ready | Streaming CSV downloads for Orders, Service Requests, Customers & Invoices |
+| **Phase 16** | Live Support Chat & WebSockets | ✅ Ready | Socket.io chat room mesh, typing indicators, Redis PubSub & BullMQ offline alerts |
+| **Phase 17** | Field Technician Mobile Portal | ✅ Ready | 5-Screen mobile technician app, job tabs, calendar schedule & photo uploads |
 
 ---
 
