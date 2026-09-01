@@ -19,7 +19,7 @@ async function bootstrap() {
   app.use(
     express.text({
       type: 'application/json',
-      limit: '10mb',
+      limit: '1000mb',
       verify: (req: any, _res, buf) => {
         req.rawBody = buf;
       },
@@ -50,7 +50,7 @@ async function bootstrap() {
       next();
     },
   );
-  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '1000mb' }));
 
   // Strict CORS Configuration (prevents wildcard origin credential leaks)
   const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
@@ -87,6 +87,9 @@ async function bootstrap() {
     },
     credentials: true,
   });
+
+  // Global API Version Prefix (routes mounted at /api/v1/...)
+  app.setGlobalPrefix('api/v1', { exclude: ['/', 'docs'] });
 
   app.useGlobalPipes(
     new ValidationPipe({
