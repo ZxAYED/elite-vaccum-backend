@@ -20,10 +20,10 @@ Welcome to the **Elite Central Vacuum** API Integration Guide. This document pro
 - [Phase 11: Real-Time WebSocket & In-App Notifications](#phase-11-real-time-websocket--in-app-notifications)
 - [Phase 12: Invoicing, Payments & Refunds](#phase-12-invoicing-payments--refunds)
 - [Phase 13: Customer Reviews & Ratings](#phase-13-customer-reviews--ratings)
-- [Phase 14: Analytics, System Settings & AI Assistant](#phase-14-analytics-system-settings--ai-assistant)
+- [Phase 14: System Settings, FAQs & Legal Policies](#phase-14-system-settings-faqs--legal-policies)
 - [Phase 15: CSV Data Export & Reporting](#phase-15-csv-data-export--reporting)
 - [Phase 16: Live Real-Time Support Chat & WebSockets](#phase-16-live-real-time-support-chat--websockets)
-- [Phase 17: Field Technician Mobile Portal & Admin Management](#phase-17-field-technician-portal--mobile-app)
+- [Phase 17: Field Technician Mobile Portal & Admin Management](#phase-17-field-technician-mobile-portal--admin-management)
 
 ---
 
@@ -1096,46 +1096,91 @@ socket.on('notification:unread_count', (payload) => {
 
 ---
 
-## Phase 14: Analytics, System Settings & AI Assistant
+## Phase 14: System Settings, FAQs & Legal Policies
 
-### 14.1 Stream AI Assistant (Gemini 2.5 Flash SSE)
-- **Endpoint**: `POST /ai/chat/stream`
-- **Access**: `Authenticated` (`CUSTOMER`, `ADMIN`, `TECHNICIAN`)
-- **Content-Type**: `text/event-stream` (Server-Sent Events)
-- **Request Body**:
+> [!NOTE]
+> **AI Diagnostics Assistant (`/ai/*`)**: The AI Assistant streaming and diagnostic intake endpoints (`POST /ai/chat/stream`, `POST /ai/chat`, `POST /ai/service-intake`) are reserved for a dedicated future AI enhancement milestone. Frontend integration for this phase focuses on **Business Profile**, **FAQ Knowledge Base**, and **Legal Policies Management**.
+
+### 14.1 Public & Admin Business Profile
+- **Get Public Profile**: `GET /settings/business-profile`
+  - **Access**: `Public`
+  - **Response `200 OK`**:
 ```json
 {
-  "message": "What is the recommended air-watt rating for a 4,500 sq ft home?"
+  "companyName": "Elite Central Vacuum Systems",
+  "email": "contact@elitevacuum.com",
+  "phone": "+1 555-0199",
+  "emergencyPhone": "+1 555-0198",
+  "address": "123 Industrial Way, Suite 100, New York, NY 10001",
+  "operatingHours": {
+    "monday": "8:00 AM - 6:00 PM",
+    "tuesday": "8:00 AM - 6:00 PM",
+    "wednesday": "8:00 AM - 6:00 PM",
+    "thursday": "8:00 AM - 6:00 PM",
+    "friday": "8:00 AM - 5:00 PM",
+    "saturday": "9:00 AM - 2:00 PM",
+    "sunday": "Closed"
+  },
+  "serviceRadiusMiles": 50,
+  "coverageNotes": "Servicing Greater NYC Metro Area, Long Island, and Northern New Jersey."
 }
 ```
+- **Admin Update Profile**: `PATCH /settings/business-profile`
+  - **Access**: `ADMIN`
+  - **Request Body**: Same schema as above (partial fields accepted).
 
-### 14.2 Non-Streaming AI Prompt
-- **Endpoint**: `POST /ai/chat`
-- **Access**: `Authenticated`
-- **Request Body**: `{"message": "How often should I change central vac filters?"}`
+### 14.2 FAQs Management
+- **List Public FAQs**: `GET /settings/faqs`
+  - **Access**: `Public`
+  - **Query Parameters**: `?category=MAINTENANCE&status=ACTIVE`
+  - **Response `200 OK`**:
+```json
+[
+  {
+    "id": "faq-uuid-01",
+    "question": "How often should I change my central vacuum filter or empty the canister?",
+    "answer": "We recommend inspecting and emptying the dirt receptacle every 3 to 6 months.",
+    "category": "MAINTENANCE",
+    "sortOrder": 1,
+    "isActive": true
+  }
+]
+```
+- **Admin Create FAQ**: `POST /settings/faqs`
+  - **Access**: `ADMIN`
+  - **Request Body**:
+```json
+{
+  "question": "What should I do if suction suddenly drops in one wall inlet?",
+  "answer": "Check if other inlets have normal suction. If only one inlet is affected, there may be a localized blockage at the 90-degree elbow.",
+  "category": "TROUBLESHOOTING",
+  "sortOrder": 2,
+  "isActive": true
+}
+```
+- **Admin Update FAQ**: `PATCH /settings/faqs/:id` (`ADMIN`)
+- **Admin Delete FAQ**: `DELETE /settings/faqs/:id` (`ADMIN`)
 
-### 14.3 AI Problem Diagnostic Extraction
-- **Endpoint**: `POST /ai/service-intake`
-- **Access**: `CUSTOMER`, `ADMIN`
-- **Request Body**: `{"message": "Our Beam central vacuum in the basement is making a whistling noise and won't turn on upstairs."}`
-- **Response `200 OK`**: Returns structured JSON with identified symptoms, potential cause, and recommended service.
-
-### 14.4 Public & Admin Business Profile
-- `GET /settings/business-profile` — Public contact info, service coverage notes, operating hours.
-- `PATCH /settings/business-profile` — Admin update business details.
-
-### 14.5 FAQs Management
-- `GET /settings/faqs` — Public FAQs grouped by category.
-- `POST /settings/faqs` — Admin create FAQ.
-- `PATCH /settings/faqs/:id` — Admin edit FAQ.
-- `DELETE /settings/faqs/:id` — Admin delete FAQ.
-
-### 14.6 Legal Policies Management
-- `GET /settings/policies` — Public list of all legal policies.
-- `GET /settings/policies/:slug` — Public get policy by slug (e.g. `terms`, `privacy`, `warranty`).
-- `POST /settings/policies` — Admin create policy.
-- `PATCH /settings/policies/:id` — Admin update policy.
-- `DELETE /settings/policies/:id` — Admin delete policy.
+### 14.3 Legal Policies Management
+- **List All Policies**: `GET /settings/policies` (`Public`)
+- **Get Policy by Slug**: `GET /settings/policies/:slug` (e.g. `/settings/policies/terms`, `/settings/policies/privacy`, `/settings/policies/warranty`)
+  - **Access**: `Public`
+  - **Response `200 OK`**:
+```json
+{
+  "id": "policy-uuid-01",
+  "title": "Warranty & Service Guarantee",
+  "slug": "warranty",
+  "contentMarkdown": "## 10-Year Limited Motor Warranty\nAll installed Elite power units include...",
+  "contentHtml": "<h2>10-Year Limited Motor Warranty</h2><p>All installed Elite power units include...</p>",
+  "version": "1.2",
+  "effectiveDate": "2026-01-01T00:00:00Z",
+  "isActive": true
+}
+```
+- **Admin Create Policy**: `POST /settings/policies` (`ADMIN`)
+- **Admin Update Policy**: `PATCH /settings/policies/:id` (`ADMIN`)
+- **Admin Delete Policy**: `DELETE /settings/policies/:id` (`ADMIN`)
 
 ---
 

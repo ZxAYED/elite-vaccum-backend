@@ -166,55 +166,35 @@
 
 ---
 
-## 👥 Role-Based Workflow Architecture (Admin vs. Customer vs. Technician)
+---
+
+## 👥 Multi-Role Domain Architecture (Customer &bull; Admin &bull; Field Technician)
+
+The platform enforces a unified identity model with three distinct operational roles:
 
 ```
-===================================================================================
-1. PRODUCT & STORE DOMAIN
-===================================================================================
-[ADMIN]                                              [CUSTOMER]
-• POST /categories (Create)                          • GET /categories (Browse categories)
-• POST /products (Create with Cloudinary media)      • GET /products (Filter, search, paginate)
-• PATCH /products/:id (Edit specs, price, SKU)       • GET /products/:id (View specs & photos)
-• PATCH /products/:id/stock (Update inventory)       • POST /store/cart/items (Add to Cart)
-• PATCH /products/:id/status (Toggle ACTIVE)         • POST /store/checkout (Stripe / COD)
-• PATCH /store/orders/:id/status (SHIPPED + carrier) • GET /store/orders/me (Track order timeline)
-
-===================================================================================
-2. SERVICE INTAKE, QUOTATIONS & FIELD DISPATCH DOMAIN
-===================================================================================
-[CUSTOMER]                                           [ADMIN / TECHNICIAN]
-1. Selects service & inspects symptoms
-2. GET /schedule/slots (Check available slots)
-3. POST /services/requests (Submit intake + photos)  ───► [ADMIN] GET /services/requests (Review intake)
-                                                     ───► [ADMIN] POST /quotations (Draft itemized quote)
-4. GET /quotations/me (View itemized quote)          ◄─── [ADMIN] PATCH /quotations/:id/send (Send to customer)
-5. PATCH /quotations/:id/accept (Sign & accept)      ───► [SYSTEM] Auto-creates ServiceOrder & Appointment
-                                                     ───► [ADMIN] POST /service-orders/:id/dispatch (Assign tech)
-                                                     ───► [TECH] PATCH /service-orders/:id/status (EN_ROUTE -> IN_PROGRESS)
-                                                     ───► [TECH] POST /service-orders/:id/reports (Complete job report)
-6. GET /service-orders/me (Live status & tech ETA)
-
-===================================================================================
-3. BILLING, INVOICES & PAYMENTS DOMAIN
-===================================================================================
-[ADMIN]                                              [CUSTOMER]
-• POST /billing/invoices (Generate invoice)          • GET /billing/invoices/me (View invoices)
-• GET /billing/invoices (Admin audit & filter)       • GET /billing/invoices/:id/html (Print PDF/HTML)
-• POST /billing/invoices/:id/record-payment (Offline)• POST /billing/invoices/:id/stripe/payment-intent
-• POST /billing/invoices/:id/refund (Issue refund)   • POST /billing/invoices/:id/stripe/confirm (Pay online)
-
-===================================================================================
-4. LIVE REAL-TIME SUPPORT CHAT DOMAIN
-===================================================================================
-[CUSTOMER]                                           [ADMIN]
-• POST /chat/conversations (Start Support Chat)      • GET /chat/conversations (Admin Live Inbox)
-• WS: chat:send_message (Send text/questions)        • WS: chat:send_message (Admin instant reply)
-• REST: POST /chat/conversations/:id/messages (Upload photos)
-• WS: chat:typing (Live typing indicator)            • WS: chat:typing (Live typing indicator)
-• WS: chat:mark_read (Read receipts)                 • WS: chat:mark_read (Read receipts)
-• BullMQ alerts via Email if recipient offline       • BullMQ alerts via Email if recipient offline
+┌───────────────────────────────┐
+│     CUSTOMER EXPERIENCE       │ ──► E-Commerce Shopping Cart & Stripe Checkout
+│  (Residential & Commercial)   │ ──► Self-Service Central Vac Intake & Scheduling
+│                               │ ──► Interactive Quotation Approval & Live Dispatch Tracking
+└───────────────────────────────┘
+               │
+               ▼
+┌───────────────────────────────┐
+│       ADMIN OPERATIONS        │ ──► Centralized Dispatch Board & Technician Scheduling
+│      (Dispatch & Back-Office) │ ──► Automated Invoicing, Partial Refunds & Payment Ledgers
+│                               │ ──► Product Catalog, Media Management & Inventory Control
+└───────────────────────────────┘
+               │
+               ▼
+┌───────────────────────────────┐
+│    FIELD TECHNICIAN SUITE     │ ──► Real-Time Mobile Job Feed & Status Transitions
+│      (On-Site Field App)      │ ──► Live ETA Broadcasts & Turn-by-Turn GPS Dispatch
+│                               │ ──► Diagnostic Completion Reports & Availability Toggle
+└───────────────────────────────┘
 ```
+
+> **Note**: For the full endpoint reference and step-by-step frontend integration instructions for each role, see the dedicated [Frontend API Integration Guide](file:///d:/Project/aryegrunzwieg-backend/docs/API_INTEGRATION_GUIDE.md).
 
 ---
 
@@ -427,30 +407,11 @@ npm run test:e2e
 
 ## 📖 Frontend API Integration Guide
 
-For the full phase-by-phase frontend integration roadmap covering all 14 feature domains with exact schemas, example payloads, error codes, and frontend recipes:
+For the full, production-ready frontend integration roadmap with exact TypeScript definitions, query parameters, request/response bodies, rate limits, WebSocket event flows, and role-based UX recipes:
 
-👉 **[Complete Phase-by-Phase Frontend API Integration Guide (17 Phases)](./docs/API_INTEGRATION_GUIDE.md)**
+👉 **[Read the Complete Frontend API Integration Guide (docs/API_INTEGRATION_GUIDE.md)](./docs/API_INTEGRATION_GUIDE.md)**
 
-| Phase | Feature Domain | Status | Description |
-| :--- | :--- | :--- | :--- |
-| **Phase 0** | Global Architecture & Client Setup | ✅ Ready | Axios interceptor, Base URLs, HttpOnly cookies, pagination |
-| **Phase 1** | Authentication & User Accounts | ✅ Ready | Register, Rate-limited Email OTP, Login, `/auth/me`, Password Reset |
-| **Phase 2** | Categories & Taxonomy | ✅ Ready | Category hierarchy with active product counters & admin CRUD |
-| **Phase 3** | Products Catalog & Search | ✅ Ready | Multi-attribute search, filters, Cloudinary upload & admin product management |
-| **Phase 4** | Shopping Cart Management | ✅ Ready | Live price recalculation, stock checks, free shipping threshold & pre-checkout validation |
-| **Phase 5** | Saved Delivery Addresses & Customers | ✅ Ready | Address book CRUD, default selector & Admin customer CRM management |
-| **Phase 6** | E-Commerce Orders, Checkout & Returns | ✅ Ready | Stripe Checkout Session, COD, live tracking timeline, returns & auto-restock |
-| **Phase 7** | Services Catalog & Scheduling | ✅ Ready | Service offerings, dynamic slot availability engine & Redlock appointment booking |
-| **Phase 8** | Service Intake Requests | ✅ Ready | Multi-step intake with symptom tags, direct Cloudinary attachments & admin triage |
-| **Phase 9** | Quotations & Customer Approval | ✅ Ready | Itemized estimates, revision history, customer Accept/Reject with Redis locks |
-| **Phase 10** | Service Orders & Field Dispatch | ✅ Ready | Technician assignment, live ETA updates, status transitions & completion reports |
-| **Phase 11** | Real-Time Notifications & WSS | ✅ Ready | WebSocket Gateway, BullMQ delivery, unread badge counter & preferences |
-| **Phase 12** | Invoicing, Payments & Refunds | ✅ Ready | Multi-line invoices, Stripe PaymentIntent, printable HTML & payment ledger |
-| **Phase 13** | Customer Reviews & Ratings | ✅ Ready | Verified customer reviews, 5-star rating aggregates & admin moderation |
-| **Phase 14** | Analytics, Settings & AI Assistant | ✅ Ready | Business profile, FAQs, policies & Gemini 1.5 SSE streaming assistant |
-| **Phase 15** | CSV Data Export & Reporting | ✅ Ready | Streaming CSV downloads for Orders, Service Requests, Customers & Invoices |
-| **Phase 16** | Live Support Chat & WebSockets | ✅ Ready | Socket.io chat room mesh, typing indicators, Redis PubSub & BullMQ offline alerts |
-| **Phase 17** | Field Technician Mobile Portal | ✅ Ready | 5-Screen mobile technician app, job tabs, calendar schedule & photo uploads |
+The guide covers all 17 feature phases for **Customer**, **Admin**, and **Field Technician** client applications with zero omitted endpoints.
 
 ---
 
