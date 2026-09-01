@@ -88,8 +88,6 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // Global API Version Prefix (routes mounted at /api/v1/...)
-  app.setGlobalPrefix('api/v1', { exclude: ['/', 'docs'] });
 
   app.useGlobalPipes(
     new ValidationPipe({

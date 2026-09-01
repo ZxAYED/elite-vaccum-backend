@@ -32,8 +32,8 @@ Welcome to the **Elite Central Vacuum** API Integration Guide. This document pro
 ### Base URLs & Environment
 | Environment | REST API Base URL | WebSocket Gateway URL | Swagger Docs |
 | :--- | :--- | :--- | :--- |
-| **Development** | `http://localhost:5000/api/v1` | `ws://localhost:5000/notifications` | `http://localhost:5000/api/docs` |
-| **Production** | `https://api.yourdomain.com/api/v1` | `wss://api.yourdomain.com/notifications` | `https://api.yourdomain.com/api/docs` |
+| **Development** | `http://localhost:3000` | `ws://localhost:3000/notifications` | `http://localhost:3000/docs` |
+| **Production** | `https://api.yourdomain.com` | `wss://api.yourdomain.com/notifications` | `https://api.yourdomain.com/docs` |
 
 ### Standard Request Headers
 ```http
@@ -52,7 +52,7 @@ The backend uses a hybrid token strategy:
 import axios from 'axios';
 
 export const apiClient = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000/api/v1',
+  baseURL: process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000',
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
