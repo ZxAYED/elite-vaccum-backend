@@ -93,7 +93,7 @@ export function createRedisClient(options: RedisModuleOptions, label = 'Main'): 
 
 /**
  * Creates a BullMQ-compatible Redis connection object.
- * BullMQ requires `maxRetriesPerRequest: null` and `enableReadyCheck: false`.
+ * BullMQ requires `maxRetriesPerRequest: null`, `enableReadyCheck: false`, and explicitly forbids ioredis `keyPrefix`.
  */
 export function createBullMQRedisConnection(
   configService?: ConfigService,
@@ -101,12 +101,16 @@ export function createBullMQRedisConnection(
 ): Redis {
   const baseOptions = resolveRedisOptions(configService);
 
+  const { keyPrefix, ...restBaseOptions } = baseOptions;
+
   const bullOptions: RedisModuleOptions = {
-    ...baseOptions,
+    ...restBaseOptions,
     ...customOptions,
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
   };
+
+  delete bullOptions.keyPrefix;
 
   return createRedisClient(bullOptions, 'BullMQ');
 }
