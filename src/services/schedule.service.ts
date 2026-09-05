@@ -101,7 +101,20 @@ export class ScheduleService {
    */
   async getDailySlots(query: AvailableSlotsQueryDto) {
     const targetDate = query.date.trim();
-    const cacheKey = `schedule:slots:${targetDate}:${query.technicianId || 'all'}`;
+    const rawTech = (query.technicianId || query.techId)?.trim();
+    let resolvedTechnicianId: string | undefined = undefined;
+
+    if (rawTech && rawTech !== '' && rawTech.toLowerCase() !== 'all') {
+      const tech = await this.prisma.technician.findFirst({
+        where: {
+          OR: [{ id: rawTech }, { userId: rawTech }],
+        },
+        select: { id: true },
+      });
+      resolvedTechnicianId = tech ? tech.id : rawTech;
+    }
+
+    const cacheKey = `schedule:slots:${targetDate}:${resolvedTechnicianId || 'all'}`;
 
     const cached = await this.redis.get<any>(cacheKey);
     if (cached) {
@@ -115,7 +128,10 @@ export class ScheduleService {
 
     // Fetch active technicians
     const technicians = await this.prisma.technician.findMany({
-      where: { status: 'ACTIVE' },
+      where: {
+        status: 'ACTIVE',
+        ...(resolvedTechnicianId ? { id: resolvedTechnicianId } : {}),
+      },
       select: { id: true, displayName: true, phone: true },
     });
 
@@ -124,7 +140,7 @@ export class ScheduleService {
       where: {
         startAt: { gte: startOfDay, lte: endOfDay },
         status: { notIn: ['CANCELLED'] },
-        ...(query.technicianId ? { technicianId: query.technicianId } : {}),
+        ...(resolvedTechnicianId ? { technicianId: resolvedTechnicianId } : {}),
       },
       include: {
         technician: { select: { id: true, displayName: true } },
@@ -195,9 +211,23 @@ export class ScheduleService {
     const startAt = new Date(Date.UTC(startYear, startMonth - 1, startDay, 0, 0, 0));
     const endAt = new Date(Date.UTC(endYear, endMonth - 1, endDay, 23, 59, 59));
 
+    // Resolve technician filter: supports technicianId or techId, accepts Technician.id or Technician.userId
+    const rawTech = (query.technicianId || query.techId)?.trim();
+    let resolvedTechnicianId: string | undefined = undefined;
+
+    if (rawTech && rawTech !== '' && rawTech.toLowerCase() !== 'all') {
+      const tech = await this.prisma.technician.findFirst({
+        where: {
+          OR: [{ id: rawTech }, { userId: rawTech }],
+        },
+        select: { id: true },
+      });
+      resolvedTechnicianId = tech ? tech.id : rawTech;
+    }
+
     const where: Prisma.AppointmentWhereInput = {
       startAt: { gte: startAt, lte: endAt },
-      ...(query.technicianId ? { technicianId: query.technicianId } : {}),
+      ...(resolvedTechnicianId ? { technicianId: resolvedTechnicianId } : {}),
       ...(query.status ? { status: query.status } : {}),
     };
 
@@ -213,8 +243,9 @@ export class ScheduleService {
     const completedCount = appointments.filter((a) => a.status === 'COMPLETED').length;
     const cancelledCount = appointments.filter((a) => a.status === 'CANCELLED').length;
 
-    // Fetch technicians list for calendar column headers
+    // Fetch technicians list: if specific technician requested, filter to that technician; otherwise all active technicians
     const technicians = await this.prisma.technician.findMany({
+      where: resolvedTechnicianId ? { id: resolvedTechnicianId } : {},
       select: {
         id: true,
         displayName: true,
@@ -234,6 +265,7 @@ export class ScheduleService {
       meta: {
         dateFrom: query.dateFrom,
         dateTo: query.dateTo,
+        technicianId: resolvedTechnicianId || null,
         total: totalCount,
         stats: {
           confirmed: confirmedCount,

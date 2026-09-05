@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsOptional, IsUUID } from 'class-validator';
+import { IsDateString, IsOptional, IsString } from 'class-validator';
 
 export class AvailableSlotsQueryDto {
   @ApiProperty({
@@ -11,11 +11,19 @@ export class AvailableSlotsQueryDto {
 
   @ApiPropertyOptional({
     example: 'd92c7fa8-8924-4f01-a7eb-6237c569ef81',
-    description: 'Optional specific technician UUID to filter availability for',
+    description: 'Optional specific technician UUID or User UUID to filter availability for',
   })
   @IsOptional()
-  @IsUUID()
+  @IsString()
   readonly technicianId?: string;
+
+  @ApiPropertyOptional({
+    example: 'd92c7fa8-8924-4f01-a7eb-6237c569ef81',
+    description: 'Optional alias for technicianId',
+  })
+  @IsOptional()
+  @IsString()
+  readonly techId?: string;
 }
 
 export class ScheduleBoardQueryDto {
@@ -35,16 +43,25 @@ export class ScheduleBoardQueryDto {
 
   @ApiPropertyOptional({
     example: 'd92c7fa8-8924-4f01-a7eb-6237c569ef81',
-    description: 'Optional technician UUID filter',
+    description: 'Optional technician UUID filter. If omitted or "all", returns schedule across all technicians.',
   })
   @IsOptional()
-  @IsUUID()
+  @IsString()
   readonly technicianId?: string;
+
+  @ApiPropertyOptional({
+    example: 'd92c7fa8-8924-4f01-a7eb-6237c569ef81',
+    description: 'Optional alias for technicianId',
+  })
+  @IsOptional()
+  @IsString()
+  readonly techId?: string;
 
   @ApiPropertyOptional({
     example: 'CONFIRMED',
     description: 'Optional appointment status filter (CONFIRMED, RESCHEDULED, CANCELLED, COMPLETED)',
   })
   @IsOptional()
+  @IsString()
   readonly status?: string;
 }
