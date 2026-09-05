@@ -132,8 +132,7 @@ async function runStoreTests() {
     const signupRes = await request('/auth/signup', {
       method: 'POST',
       body: JSON.stringify({
-        firstName: 'Test',
-        lastName: 'Customer',
+        fullName: 'Test Customer',
         email: testEmail,
         password: testPassword,
         phone: '+1-555-0199',

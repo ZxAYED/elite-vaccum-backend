@@ -4,8 +4,9 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, ServiceOrderStatus, ServiceRequestStatus } from '@prisma/client';
+import { NotificationType, Prisma, ServiceOrderStatus, ServiceRequestStatus } from '@prisma/client';
 import { RequestUser } from 'src/common/decorator/currentUser.decorator';
+import { NotificationsService } from 'src/notifications/notifications.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { RedisService } from 'src/redis';
 import { STANDARD_TIME_SLOTS } from './constants/services-catalog.constant';
@@ -22,6 +23,7 @@ export class ScheduleService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -70,6 +72,7 @@ export class ScheduleService {
           customer: {
             select: {
               id: true,
+              userId: true,
               displayName: true,
               email: true,
               phone: true,
@@ -155,6 +158,9 @@ export class ScheduleService {
 
       return {
         slot: template.slot,
+        label: template.label,
+        timeWindow: template.timeWindow,
+        period: template.period,
         startTime: template.startTime,
         endTime: template.endTime,
         isBooked,
@@ -477,14 +483,86 @@ export class ScheduleService {
       return app;
     });
 
-    const targetDateStr = (dto.date || appointment.startAt.toISOString().slice(0, 10));
-    await this.invalidateSlotCache(targetDateStr);
+    const oldDateStr = appointment.startAt.toISOString().slice(0, 10);
+    const targetDateStr = (dto.date || oldDateStr);
+
+    await this.invalidateSlotCache(oldDateStr);
+    if (targetDateStr !== oldDateStr) {
+      await this.invalidateSlotCache(targetDateStr);
+    }
+
+    // Notify customer about rescheduled appointment
+    if (updated.serviceRequest?.customer?.userId) {
+      const startTimeLabel = dto.startTime || '09:00 AM';
+      const endTimeLabel = dto.endTime || '11:00 AM';
+      this.notificationsService
+        .create({
+          userId: updated.serviceRequest.customer.userId,
+          type: NotificationType.SERVICE_REQUEST_UPDATE,
+          title: 'Service Appointment Rescheduled',
+          message: `Your service appointment for ${updated.serviceRequest.title} has been rescheduled to ${targetDateStr} (${startTimeLabel} - ${endTimeLabel}).`,
+          ctaLabel: 'View Request',
+          ctaUrl: `/user/services/requests/${updated.serviceRequest.id}`,
+          metadata: {
+            serviceRequestId: updated.serviceRequest.id,
+            appointmentId: updated.id,
+            rescheduledDate: targetDateStr,
+            startTime: startTimeLabel,
+            endTime: endTimeLabel,
+          },
+          sendEmail: true,
+          priority: 1,
+        })
+        .catch((err) => {
+          this.logger.warn(`Failed to notify customer of rescheduled appointment: ${err.message}`);
+        });
+    }
 
     return {
       success: true,
       message: 'Appointment schedule updated successfully',
       appointment: updated,
     };
+  }
+
+  async rescheduleForServiceRequest(
+    serviceRequestId: string,
+    dto: UpdateScheduleDto,
+    user: RequestUser,
+  ) {
+    const request = await this.prisma.serviceRequest.findUnique({
+      where: { id: serviceRequestId },
+      include: {
+        appointments: {
+          where: { status: { notIn: ['CANCELLED'] } },
+          orderBy: { startAt: 'desc' },
+          take: 1,
+        },
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Service request not found');
+    }
+
+    const activeAppointment = request.appointments[0];
+    if (activeAppointment) {
+      return this.updateAppointment(activeAppointment.id, dto, user);
+    }
+
+    // If no existing active appointment, create a fresh appointment
+    return this.createAppointment(
+      {
+        serviceRequestId,
+        date: dto.date || request.preferredDate,
+        startTime: dto.startTime || '09:00 AM',
+        endTime: dto.endTime || '11:00 AM',
+        technicianId: dto.technicianId,
+        adminNote: dto.adminNote,
+        notes: dto.notes,
+      },
+      user,
+    );
   }
 
   async assignTechnician(

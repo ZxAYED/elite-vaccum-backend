@@ -111,12 +111,18 @@ export class StoreCategoriesService {
         return cached;
       }
     }
+    let statusCondition: Prisma.ProductCategoryWhereInput = {};
+    if (query.status) {
+      const statusUpper = query.status.trim().toUpperCase();
+      if (statusUpper !== 'ALL') {
+        statusCondition = { status: statusUpper };
+      }
+    } else if (!admin) {
+      statusCondition = { status: 'ACTIVE' };
+    }
+
     const where: Prisma.ProductCategoryWhereInput = {
-      ...(admin
-        ? query.status
-          ? { status: query.status.toUpperCase() }
-          : {}
-        : { status: 'ACTIVE' }),
+      ...statusCondition,
       ...(query.search
         ? {
             OR: [

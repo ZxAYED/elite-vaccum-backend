@@ -38,6 +38,7 @@ import { ProductListQueryDto } from '../dto/product-list-query.dto';
 import { UpdateProductDto } from '../dto/update-product.dto';
 import { UpdateProductStatusDto } from '../dto/update-product-status.dto';
 import { UpdateProductStockDto } from '../dto/update-product-stock.dto';
+import { ReviewsService } from 'src/reviews/reviews.service';
 import { StoreProductsService } from './products.service';
 
 const productImageMulterOptions = {
@@ -75,7 +76,10 @@ const productImageMulterOptions = {
 @UseGuards(AuthGuard)
 @Controller('products')
 export class StoreProductsController {
-  constructor(private readonly productsService: StoreProductsService) {}
+  constructor(
+    private readonly productsService: StoreProductsService,
+    private readonly reviewsService: ReviewsService,
+  ) {}
 
   @Post()
   @Roles('ADMIN')
@@ -168,6 +172,17 @@ export class StoreProductsController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.productsService.getAdminProducts(query, user);
+  }
+
+  @Get(':id/my-review')
+  @Roles('CUSTOMER')
+  @ApiOperation({ summary: 'Customer: Get own review for this product (by UUID, SKU, or Model) by token' })
+  @ApiResponse({ status: 200, description: 'Own product review status and payload' })
+  getMyProductReview(
+    @Param('id') id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.reviewsService.getMyProductReview(id, user);
   }
 
   @Get(':id')

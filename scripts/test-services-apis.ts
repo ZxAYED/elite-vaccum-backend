@@ -62,7 +62,7 @@ async function runServicesTests() {
     console.error('❌ Failed to fetch service by slug:', slugRes.data);
     return;
   }
-  console.log(`✅ Fetched '${slugRes.data.data.title}' (Base: $${slugRes.data.data.basePriceUsd})`);
+  console.log(`✅ Fetched service details: '${slugRes.data.data.title}' (Group: ${slugRes.data.data.group})`);
 
   // 3. AUTH PREPARATION
   console.log('\n3️⃣  Setting up Test Authentication (Customer & Admin)...');

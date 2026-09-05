@@ -20,3 +20,14 @@ export class RejectServiceRequestDto {
   @IsString()
   readonly comments?: string;
 }
+
+export class CancelServiceRequestDto {
+  @ApiPropertyOptional({
+    example: 'Changed mind / rescheduled for a later season',
+    description: 'Optional reason for cancelling the service request',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  readonly reason?: string;
+}

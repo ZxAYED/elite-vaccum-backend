@@ -32,11 +32,20 @@ export class ServiceOrdersController {
   constructor(private readonly serviceOrdersService: ServiceOrdersService) {}
 
   @Get()
-  @Roles('ADMIN')
-  @ApiOperation({ summary: 'Admin: List all service orders with filters & KPI counts' })
+  @Roles('CUSTOMER', 'ADMIN', 'TECHNICIAN')
+  @ApiOperation({ summary: 'List service orders (Unified 2-in-1 API for Customer, Technician & Admin)' })
   @ApiResponse({ status: 200, description: 'List of service orders' })
-  async findAll(@Query() query: ServiceOrderListQueryDto) {
-    return this.serviceOrdersService.findAll(query);
+  async findAll(
+    @Query() query: ServiceOrderListQueryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    if (user?.role === 'ADMIN') {
+      return this.serviceOrdersService.findAll(query);
+    }
+    if (user?.role === 'TECHNICIAN') {
+      return this.serviceOrdersService.findAll({ ...query, technicianId: user.id });
+    }
+    return this.serviceOrdersService.getMyOrders(query, user);
   }
 
   @Get('me')

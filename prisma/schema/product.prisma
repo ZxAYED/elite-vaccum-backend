@@ -32,6 +32,7 @@ model Product {
   status         ProductStatus       @default(ACTIVE)
   availability   ProductAvailability @default(IN_STOCK)
   taxable        Boolean             @default(true)
+  isFeatured     Boolean             @default(false) @map("is_featured")
   shippingLabel  String?             @map("shipping_label") @db.VarChar(100)
   popularityRank Int                 @default(0) @map("popularity_rank")
   imageAlt       String              @map("image_alt") @db.VarChar(255)

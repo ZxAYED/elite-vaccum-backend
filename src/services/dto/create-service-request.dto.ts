@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { AttachmentKind, RequestSymptom } from '@prisma/client';
+import { AttachmentKind, RequestSymptom, RequestUrgency } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
@@ -51,6 +51,40 @@ export class ServiceRequestAttachmentInputDto {
   @IsOptional()
   @IsString()
   readonly note?: string;
+}
+
+const SYMPTOM_LABEL_MAP: Record<string, RequestSymptom> = {
+  'unit not turning on': RequestSymptom.UNIT_NOT_TURNING_ON,
+  'unit_not_turning_on': RequestSymptom.UNIT_NOT_TURNING_ON,
+  'unit does not shut off': RequestSymptom.UNIT_DOES_NOT_SHUT_OFF,
+  'unit_does_not_shut_off': RequestSymptom.UNIT_DOES_NOT_SHUT_OFF,
+  'clogged': RequestSymptom.CLOGGED,
+  'low suction': RequestSymptom.LOW_SUCTION,
+  'low_suction': RequestSymptom.LOW_SUCTION,
+  'wall or power hose problem': RequestSymptom.WALL_OR_POWER_HOSE_PROBLEM,
+  'wall_or_power_hose_problem': RequestSymptom.WALL_OR_POWER_HOSE_PROBLEM,
+  'retractable hose problem': RequestSymptom.WALL_OR_POWER_HOSE_PROBLEM,
+  'power hose problem': RequestSymptom.WALL_OR_POWER_HOSE_PROBLEM,
+  'hose problem': RequestSymptom.WALL_OR_POWER_HOSE_PROBLEM,
+  'broken inlet': RequestSymptom.BROKEN_INLET,
+  'broken_inlet': RequestSymptom.BROKEN_INLET,
+  'noise': RequestSymptom.NOISE,
+  'other': RequestSymptom.OTHER,
+};
+
+export function normalizeSymptom(input: any): RequestSymptom {
+  if (!input || typeof input !== 'string') return RequestSymptom.OTHER;
+  const key = input.trim().toLowerCase();
+  if (SYMPTOM_LABEL_MAP[key]) return SYMPTOM_LABEL_MAP[key];
+
+  const formatted = input
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, '_') as RequestSymptom;
+  if (Object.values(RequestSymptom).includes(formatted)) {
+    return formatted;
+  }
+  return RequestSymptom.OTHER;
 }
 
 export class CreateServiceRequestDto {
@@ -112,6 +146,14 @@ export class CreateServiceRequestDto {
   @IsString()
   readonly problemLocation?: string;
 
+  @ApiPropertyOptional({
+    example: 'Attic or crawlspace',
+    description: 'Custom problem location if "Other" was selected in problemLocation',
+  })
+  @IsOptional()
+  @IsString()
+  readonly otherProblemLocation?: string;
+
   // Requested Schedule
   @ApiProperty({ example: '2026-09-15', description: 'Preferred service date (YYYY-MM-DD)' })
   @IsString()
@@ -132,7 +174,7 @@ export class CreateServiceRequestDto {
     description: 'Detailed description of the issue or project requirement',
   })
   @IsString()
-  @MinLength(10)
+  @MinLength(1)
   @MaxLength(3000)
   readonly problemDescription!: string;
 
@@ -143,10 +185,34 @@ export class CreateServiceRequestDto {
     description: 'Selected symptom tags',
   })
   @IsOptional()
-  @Transform(({ value }) => (typeof value === 'string' ? safeJsonParse(value) : value))
+  @Transform(({ value }) => {
+    const raw = typeof value === 'string' ? safeJsonParse(value) : value;
+    if (!Array.isArray(raw)) {
+      if (typeof raw === 'string') return [normalizeSymptom(raw)];
+      return [];
+    }
+    return raw.map((item) => normalizeSymptom(item));
+  })
   @IsArray()
   @IsEnum(RequestSymptom, { each: true })
   readonly symptoms?: RequestSymptom[];
+
+  @ApiPropertyOptional({
+    enum: RequestUrgency,
+    example: RequestUrgency.MEDIUM,
+    description: 'Urgency level for this request: LOW, MEDIUM, HIGH, EMERGENCY (Default: MEDIUM)',
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (!value || typeof value !== 'string') return RequestUrgency.MEDIUM;
+    const formatted = value.trim().toUpperCase() as RequestUrgency;
+    if (Object.values(RequestUrgency).includes(formatted)) {
+      return formatted;
+    }
+    return RequestUrgency.MEDIUM;
+  })
+  @IsEnum(RequestUrgency)
+  readonly urgency?: RequestUrgency;
 
   // Equipment Information (Optional)
   @ApiPropertyOptional({ example: 'Beam / Electrolux', description: 'Power unit manufacturer' })

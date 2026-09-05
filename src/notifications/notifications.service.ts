@@ -52,14 +52,20 @@ export class NotificationsService {
       );
     }
 
-    const { jobId } = await this.queueService.enqueue(dto);
-
-    return {
-      success: true,
-      message: 'Notification enqueued for processing via BullMQ',
-      jobId,
-      recipientUserId: dto.userId,
-    };
+    try {
+      const { jobId } = await this.queueService.enqueue(dto);
+      return {
+        success: true,
+        message: 'Notification enqueued for processing via BullMQ',
+        jobId,
+        recipientUserId: dto.userId,
+      };
+    } catch (queueErr: any) {
+      this.logger.warn(
+        `BullMQ enqueue failed (${queueErr.message}). Falling back to direct in-process notification delivery.`,
+      );
+      return this.processNotification(dto);
+    }
   }
 
   /**

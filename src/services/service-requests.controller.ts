@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -23,11 +24,16 @@ import { validateOrReject } from 'class-validator';
 import { CurrentUser, RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { Roles } from 'src/common/decorator/rolesDecorator';
 import { extractMultipartJsonPayload } from 'src/common/utils/parseJsonPayload';
+import { CreateQuotationDto, CreateQuotationForServiceDto } from 'src/quotations/dto/create-quotation.dto';
+import { UpdateQuotationDto } from 'src/quotations/dto/update-quotation.dto';
+import { QuotationsService } from 'src/quotations/quotations.service';
 import { AddServiceRequestAttachmentDto } from './dto/add-service-request-attachment.dto';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
-import { RejectServiceRequestDto } from './dto/reject-service-request.dto';
+import { CancelServiceRequestDto, RejectServiceRequestDto } from './dto/reject-service-request.dto';
 import { ServiceRequestListQueryDto } from './dto/service-request-list-query.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
+import { UpdateScheduleDto } from './dto/update-schedule.dto';
+import { ScheduleService } from './schedule.service';
 import { ServiceRequestsService } from './service-requests.service';
 
 @ApiTags('Services - Requests & Intake')
@@ -35,7 +41,11 @@ import { ServiceRequestsService } from './service-requests.service';
 @ApiBearerAuth('bearer')
 @Controller('service-requests')
 export class ServiceRequestsController {
-  constructor(private readonly serviceRequestsService: ServiceRequestsService) {}
+  constructor(
+    private readonly serviceRequestsService: ServiceRequestsService,
+    private readonly quotationsService: QuotationsService,
+    private readonly scheduleService: ScheduleService,
+  ) {}
 
   @Post()
   @ApiBearerAuth('JWT-auth')
@@ -103,7 +113,7 @@ export class ServiceRequestsController {
     const dto = plainToInstance(CreateServiceRequestDto, payload);
     await validateOrReject(dto, {
       whitelist: true,
-      forbidNonWhitelisted: true,
+      forbidNonWhitelisted: false,
     });
     return this.serviceRequestsService.createRequest(dto, files, user);
   }
@@ -123,15 +133,21 @@ export class ServiceRequestsController {
   }
 
   @Get()
-  @Roles('ADMIN')
+  @Roles('CUSTOMER', 'ADMIN', 'TECHNICIAN')
   @ApiOperation({
-    summary: 'Admin: Searchable & filterable triage list with live KPI badges',
+    summary: 'List service requests (Unified 2-in-1 API for Customer & Admin)',
     description:
-      'Returns paginated list of all service requests with aggregated counts (submitted, underReview, accepted, rejected, scheduled).',
+      'For Customers, returns their own service requests. For Admins, returns all service requests with KPI counts and search/filter options. Accepts optional customerId query param for Admins.',
   })
-  @ApiResponse({ status: 200, description: 'Admin service request triage list with KPIs' })
-  async getAdminRequests(@Query() query: ServiceRequestListQueryDto) {
-    return this.serviceRequestsService.getAdminRequests(query);
+  @ApiResponse({ status: 200, description: 'Service request list with KPI statistics' })
+  async getRequests(
+    @Query() query: ServiceRequestListQueryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    if (this.serviceRequestsService.isAdmin(user)) {
+      return this.serviceRequestsService.getAdminRequests(query);
+    }
+    return this.serviceRequestsService.getMyRequests(query, user);
   }
 
   @Get(':id')
@@ -162,6 +178,22 @@ export class ServiceRequestsController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.serviceRequestsService.updateStatus(id, dto, user);
+  }
+
+  @Post(':id/cancel')
+  @Patch(':id/cancel')
+  @Roles('CUSTOMER', 'ADMIN')
+  @ApiOperation({
+    summary: 'Cancel service request and release booked appointment slot',
+    description: 'Cancels the service request (allowed for customers while pending and admins anytime) and frees reserved schedule capacity.',
+  })
+  @ApiResponse({ status: 200, description: 'Service request cancelled successfully' })
+  async cancelRequest(
+    @Param('id') id: string,
+    @Body() dto: CancelServiceRequestDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.serviceRequestsService.cancelRequest(id, dto, user);
   }
 
   @Post(':id/reject')
@@ -218,5 +250,96 @@ export class ServiceRequestsController {
     const payload = extractMultipartJsonPayload<AddServiceRequestAttachmentDto>(rawBody);
     const dto = plainToInstance(AddServiceRequestAttachmentDto, payload);
     return this.serviceRequestsService.addAttachments(id, dto, files, user);
+  }
+
+  @Delete(':id/attachments/:attachmentId')
+  @Roles('CUSTOMER', 'ADMIN')
+  @ApiOperation({
+    summary: 'Delete an attachment from a service request',
+    description: 'Removes an uploaded photo, video, or document from the service request.',
+  })
+  @ApiResponse({ status: 200, description: 'Attachment deleted successfully' })
+  async deleteAttachment(
+    @Param('id') id: string,
+    @Param('attachmentId') attachmentId: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.serviceRequestsService.deleteAttachment(id, attachmentId, user);
+  }
+
+  // QUOTATION SUB-SYSTEM ENDPOINTS FOR SERVICE REQUEST
+
+  @Get(':id/quotation')
+  @Roles('CUSTOMER', 'ADMIN')
+  @ApiOperation({
+    summary: 'Get quotation data for this service request (active quotation + history)',
+    description: 'Fetches the active quotation and historical revisions/rejections for this service request.',
+  })
+  @ApiResponse({ status: 200, description: 'Quotation data for this service request' })
+  async getQuotation(
+    @Param('id') id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.quotationsService.getByServiceRequest(id, user);
+  }
+
+  @Post(':id/quotation')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Admin: Create itemized quotation for this service request',
+    description: 'Creates a quotation directly attached to this service request. Only 1 active quotation is allowed at a time.',
+  })
+  @ApiResponse({ status: 201, description: 'Quotation created successfully' })
+  async createQuotation(
+    @Param('id') id: string,
+    @Body() dto: CreateQuotationForServiceDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.quotationsService.create(dto as CreateQuotationDto, user, id);
+  }
+
+  @Patch(':id/quotation')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Admin: Modify or revise the active quotation for this service request',
+    description: 'Allows admin to edit line items, notes, terms, and discounts before customer accepts or rejects. Accepted or rejected quotations are locked and cannot be modified.',
+  })
+  @ApiResponse({ status: 200, description: 'Quotation revised successfully' })
+  async updateQuotation(
+    @Param('id') id: string,
+    @Body() dto: UpdateQuotationDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.quotationsService.updateByServiceRequest(id, dto, user);
+  }
+
+  @Delete(':id/quotation')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Admin: Delete the active quotation for this service request',
+    description: 'Deletes the quotation and rolls back request status to UNDER_REVIEW so admin can create another if needed.',
+  })
+  @ApiResponse({ status: 200, description: 'Quotation deleted successfully' })
+  async deleteQuotation(
+    @Param('id') id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.quotationsService.deleteByServiceRequest(id, user);
+  }
+
+  @Patch(':id/schedule')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Admin: Reschedule appointment for this service request',
+    description:
+      'Reschedules the appointment date and time window with conflict validation, slot cache invalidation, and automatic customer notification.',
+  })
+  @ApiResponse({ status: 200, description: 'Service request appointment rescheduled successfully' })
+  async rescheduleRequest(
+    @Param('id') id: string,
+    @Body() dto: UpdateScheduleDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.scheduleService.rescheduleForServiceRequest(id, dto, user);
   }
 }

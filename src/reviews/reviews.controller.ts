@@ -45,6 +45,30 @@ export class ReviewsController {
     return this.reviewsService.getMyReviews(query, user);
   }
 
+  @Get('me/products')
+  @ApiBearerAuth('JWT-auth')
+  @Roles('CUSTOMER')
+  @ApiOperation({ summary: 'Customer: List all own reviewed products with full product and review metadata' })
+  @ApiResponse({ status: 200, description: 'Customer reviewed products list' })
+  async getMyReviewedProducts(
+    @Query() query: ReviewListQueryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.reviewsService.getMyReviewedProducts(query, user);
+  }
+
+  @Get('products/:productId/me')
+  @ApiBearerAuth('JWT-auth')
+  @Roles('CUSTOMER')
+  @ApiOperation({ summary: 'Customer: Get own review for a specific product (by UUID, SKU, or Model) by token' })
+  @ApiResponse({ status: 200, description: 'Own product review status and payload' })
+  async getMyProductReview(
+    @Param('productId') productId: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.reviewsService.getMyProductReview(productId, user);
+  }
+
   @Post()
   @ApiBearerAuth('JWT-auth')
   @Roles('CUSTOMER')

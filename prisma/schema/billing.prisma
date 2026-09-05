@@ -8,6 +8,7 @@ model Invoice {
   customerId     String        @map("customer_id") @db.Uuid
   productOrderId String?       @map("product_order_id") @db.Uuid
   serviceOrderId String?       @map("service_order_id") @db.Uuid
+  serviceRequestId String?     @map("service_request_id") @db.Uuid
   quotationId    String?       @map("quotation_id") @db.Uuid
   status         InvoiceStatus @default(ISSUED)
   issueDate      DateTime      @default(now()) @map("issue_date") @db.Timestamptz
@@ -21,16 +22,18 @@ model Invoice {
   createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz
 
-  customer     Customer          @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  productOrder ProductOrder?     @relation(fields: [productOrderId], references: [id], onDelete: SetNull)
-  serviceOrder ServiceOrder?     @relation(fields: [serviceOrderId], references: [id], onDelete: SetNull)
-  quotation    Quotation?        @relation(fields: [quotationId], references: [id], onDelete: SetNull)
-  lineItems    InvoiceLineItem[]
-  payments     Payment[]
-  refunds      Refund[]
+  customer       Customer          @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  productOrder   ProductOrder?     @relation(fields: [productOrderId], references: [id], onDelete: SetNull)
+  serviceOrder   ServiceOrder?     @relation(fields: [serviceOrderId], references: [id], onDelete: SetNull)
+  serviceRequest ServiceRequest?   @relation(fields: [serviceRequestId], references: [id], onDelete: SetNull)
+  quotation      Quotation?        @relation(fields: [quotationId], references: [id], onDelete: SetNull)
+  lineItems      InvoiceLineItem[]
+  payments       Payment[]
+  refunds        Refund[]
 
   @@index([customerId, status])
   @@index([status, dueDate])
+  @@index([serviceRequestId])
   @@map("invoices")
 }
 

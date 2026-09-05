@@ -42,6 +42,31 @@ export class ReviewsService {
           name: true,
           sku: true,
           model: true,
+          summary: true,
+          priceUsd: true,
+          status: true,
+          availability: true,
+          isFeatured: true,
+          images: {
+            select: {
+              id: true,
+              key: true,
+              url: true,
+              alt: true,
+              isPrimary: true,
+              sortOrder: true,
+            },
+            orderBy: { isPrimary: 'desc' },
+          },
+        },
+      },
+      productOrder: {
+        select: {
+          id: true,
+          businessId: true,
+          status: true,
+          totalUsd: true,
+          placedAt: true,
         },
       },
       service: {
@@ -49,6 +74,14 @@ export class ReviewsService {
           id: true,
           name: true,
           slug: true,
+          category: true,
+        },
+      },
+      serviceOrder: {
+        select: {
+          id: true,
+          businessId: true,
+          status: true,
         },
       },
       moderationHistory: {
@@ -199,6 +232,9 @@ export class ReviewsService {
     const where: Prisma.CustomerReviewWhereInput = {
       customerId: customer.id,
       ...(query.type ? { type: query.type } : {}),
+      ...(query.productId ? { productId: query.productId } : {}),
+      ...(query.serviceId ? { serviceId: query.serviceId } : {}),
+      ...(query.rating ? { rating: query.rating } : {}),
     };
 
     const totalItems = await this.prisma.customerReview.count({ where });
@@ -213,6 +249,197 @@ export class ReviewsService {
     });
 
     return { items, meta };
+  }
+
+  /**
+   * Customer: Get all products reviewed by the authenticated customer with review and product details.
+   */
+  async getMyReviewedProducts(query: ReviewListQueryDto, user: RequestUser) {
+    const customer = await this.prisma.customer.findUnique({
+      where: { userId: user.id },
+      select: { id: true, displayName: true },
+    });
+
+    if (!customer) {
+      return {
+        items: [],
+        meta: {
+          page: 1,
+          limit: 10,
+          total: 0,
+          totalPages: 0,
+          analytics: {
+            averageRatingGiven: 0,
+            totalReviewedProducts: 0,
+          },
+        },
+      };
+    }
+
+    const where: Prisma.CustomerReviewWhereInput = {
+      customerId: customer.id,
+      type: ReviewType.PRODUCT,
+      productId: { not: null },
+      ...(query.rating ? { rating: query.rating } : {}),
+    };
+
+    const totalItems = await this.prisma.customerReview.count({ where });
+    const { skip, take, meta } = getPagination(query.page, query.limit, totalItems);
+
+    const [reviews, aggregate] = await Promise.all([
+      this.prisma.customerReview.findMany({
+        where,
+        skip,
+        take,
+        orderBy: { submittedAt: 'desc' },
+        include: this.reviewInclude(),
+      }),
+      this.prisma.customerReview.aggregate({
+        where,
+        _avg: { rating: true },
+        _count: { id: true },
+      }),
+    ]);
+
+    const items = reviews.map((r) => ({
+      review: {
+        id: r.id,
+        rating: r.rating,
+        title: r.title,
+        body: r.body,
+        preview: r.preview,
+        status: r.status,
+        submittedAt: r.submittedAt,
+        publishedAt: r.publishedAt,
+      },
+      product: r.product
+        ? {
+            id: r.product.id,
+            name: r.product.name,
+            sku: r.product.sku,
+            model: r.product.model,
+            summary: r.product.summary,
+            priceUsd: r.product.priceUsd ? Number(r.product.priceUsd) : 0,
+            status: r.product.status,
+            availability: r.product.availability,
+            isFeatured: r.product.isFeatured,
+            images: r.product.images || [],
+          }
+        : null,
+      order: r.productOrder
+        ? {
+            id: r.productOrder.id,
+            businessId: r.productOrder.businessId,
+            status: r.productOrder.status,
+            totalUsd: r.productOrder.totalUsd ? Number(r.productOrder.totalUsd) : 0,
+            placedAt: r.productOrder.placedAt,
+          }
+        : null,
+    }));
+
+    return {
+      items,
+      meta: {
+        ...meta,
+        analytics: {
+          averageRatingGiven: aggregate._avg.rating
+            ? Number(aggregate._avg.rating.toFixed(1))
+            : 0,
+          totalReviewedProducts: aggregate._count.id,
+        },
+      },
+    };
+  }
+
+  /**
+   * Customer: Get own review for a specific product by product ID, SKU, or model.
+   */
+  async getMyProductReview(productIdOrIdentifier: string, user: RequestUser) {
+    const customer = await this.prisma.customer.findUnique({
+      where: { userId: user.id },
+      select: { id: true, displayName: true },
+    });
+
+    if (!customer) {
+      return {
+        hasReviewed: false,
+        product: null,
+        review: null,
+      };
+    }
+
+    const trimmed = productIdOrIdentifier.trim();
+    const isUuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        trimmed,
+      );
+
+    const product = await this.prisma.product.findFirst({
+      where: isUuid
+        ? { id: trimmed }
+        : {
+            OR: [
+              { sku: { equals: trimmed, mode: 'insensitive' } },
+              { model: { equals: trimmed, mode: 'insensitive' } },
+              { name: { contains: trimmed, mode: 'insensitive' } },
+            ],
+          },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        model: true,
+        priceUsd: true,
+        images: {
+          select: {
+            id: true,
+            key: true,
+            url: true,
+            alt: true,
+            isPrimary: true,
+          },
+          orderBy: { isPrimary: 'desc' },
+          take: 1,
+        },
+      },
+    });
+
+    if (!product) {
+      throw new NotFoundException(`Product '${productIdOrIdentifier}' not found`);
+    }
+
+    const review = await this.prisma.customerReview.findFirst({
+      where: {
+        customerId: customer.id,
+        productId: product.id,
+      },
+      include: this.reviewInclude(),
+      orderBy: { submittedAt: 'desc' },
+    });
+
+    return {
+      hasReviewed: !!review,
+      product: {
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        model: product.model,
+        priceUsd: product.priceUsd ? Number(product.priceUsd) : 0,
+        primaryImage: product.images?.[0] || null,
+      },
+      review: review
+        ? {
+            id: review.id,
+            rating: review.rating,
+            title: review.title,
+            body: review.body,
+            preview: review.preview,
+            status: review.status,
+            submittedAt: review.submittedAt,
+            publishedAt: review.publishedAt,
+          }
+        : null,
+    };
   }
 
 

@@ -161,14 +161,25 @@ export class CreateProductDto {
   @IsEnum(ProductAvailability)
   readonly availability?: ProductAvailability = ProductAvailability.IN_STOCK;
 
-  @ApiPropertyOptional({ example: true, default: true })
+  @ApiPropertyOptional({ default: true })
   @IsOptional()
-  @Transform(
-    ({ value }) =>
-      value === 'true' || value === true || value === 1 || value === '1',
-  )
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true || value === 1 || value === '1') return true;
+    if (value === 'false' || value === false || value === 0 || value === '0') return false;
+    return value;
+  })
   @IsBoolean()
   readonly taxable?: boolean = true;
+
+  @ApiPropertyOptional({ default: false, example: true })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true || value === 1 || value === '1') return true;
+    if (value === 'false' || value === false || value === 0 || value === '0') return false;
+    return value;
+  })
+  @IsBoolean()
+  readonly isFeatured?: boolean = false;
 
   @ApiPropertyOptional({ example: 'Free Standard Shipping' })
   @IsOptional()
@@ -243,10 +254,22 @@ export class CreateProductDto {
 
   @ApiPropertyOptional({
     type: [ProductImageInputDto],
-    description: 'Existing image URLs or metadata. Can be JSON stringified.',
+    description:
+      'Image URLs or metadata objects (or array of string URLs). Can be JSON stringified.',
   })
   @IsOptional()
-  @Transform(({ value }) => safeJsonParse(value))
+  @Transform(({ value }) => {
+    const parsed = safeJsonParse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item, index) => {
+        if (typeof item === 'string') {
+          return { url: item, isPrimary: index === 0, sortOrder: index };
+        }
+        return item;
+      });
+    }
+    return parsed;
+  })
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ProductImageInputDto)

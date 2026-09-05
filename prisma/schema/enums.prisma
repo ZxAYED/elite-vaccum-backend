@@ -53,6 +53,7 @@ enum ProductAvailability {
   IN_STOCK
   LOW_STOCK
   OUT_OF_STOCK
+  PREORDER
   BACKORDER
   DISCONTINUED
 }

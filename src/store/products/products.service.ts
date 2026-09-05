@@ -16,7 +16,7 @@ import { generateUniqueProductSku } from 'src/common/utils/generateSku';
 import { getPagination } from 'src/common/utils/pagination';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { RedisService } from 'src/redis';
-import { S3UploadService } from 'src/storage/s3-upload.service';
+import { CloudinaryUploadService } from 'src/storage/cloudinary-upload.service';
 import { CreateProductDto } from '../dto/create-product.dto';
 import { ProductListQueryDto } from '../dto/product-list-query.dto';
 import { UpdateProductDto } from '../dto/update-product.dto';
@@ -29,7 +29,7 @@ export class StoreProductsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly s3Service: S3UploadService,
+    private readonly cloudinaryService: CloudinaryUploadService,
     private readonly redis: RedisService,
   ) {}
 
@@ -158,7 +158,7 @@ export class StoreProductsService {
     if (files && files.length > 0) {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const uploaded = await this.s3Service.uploadFile({
+        const uploaded = await this.cloudinaryService.uploadFile({
           fileBuffer: file.buffer,
           originalName: file.originalname,
           mimeType: file.mimetype,
@@ -211,6 +211,7 @@ export class StoreProductsService {
           status: dto.status || ProductStatus.ACTIVE,
           availability: initialAvailability,
           taxable: dto.taxable ?? true,
+          isFeatured: dto.isFeatured ?? false,
           shippingLabel: dto.shippingLabel?.trim() || null,
           popularityRank: dto.popularityRank ?? 0,
           imageAlt: dto.imageAlt?.trim() || `${dto.name} product photo`,
@@ -284,15 +285,23 @@ export class StoreProductsService {
       }
     }
 
-    // 1. Status condition: Public users only ever see ACTIVE products in ACTIVE categories
-    const statusCondition: Prisma.ProductWhereInput = admin
-      ? query.status
-        ? { status: query.status }
-        : {}
-      : {
-          status: ProductStatus.ACTIVE,
-          category: { status: 'ACTIVE' },
-        };
+    // 1. Status condition: Unified 2-in-1 for Customer & Admin
+    let statusCondition: Prisma.ProductWhereInput = {};
+    if (query.status) {
+      const statusUpper = query.status.trim().toUpperCase();
+      if (statusUpper === 'ALL') {
+        statusCondition = {};
+      } else if (
+        Object.values(ProductStatus).includes(statusUpper as ProductStatus)
+      ) {
+        statusCondition = { status: statusUpper as ProductStatus };
+      }
+    } else if (!admin) {
+      statusCondition = {
+        status: ProductStatus.ACTIVE,
+        category: { status: 'ACTIVE' },
+      };
+    }
 
     // 2. Category condition: Supports category UUID, category slug, or query.category
     let categoryCondition: Prisma.ProductWhereInput = {};
@@ -394,7 +403,11 @@ export class StoreProductsService {
       };
     }
 
-    // 6. Taxable condition
+    // 6. Featured condition
+    const featuredCondition: Prisma.ProductWhereInput =
+      query.isFeatured !== undefined ? { isFeatured: query.isFeatured } : {};
+
+    // 7. Taxable condition
     const taxableCondition: Prisma.ProductWhereInput =
       query.taxable !== undefined ? { taxable: query.taxable } : {};
 
@@ -405,14 +418,21 @@ export class StoreProductsService {
       ...searchCondition,
       ...availabilityCondition,
       ...priceCondition,
+      ...featuredCondition,
       ...taxableCondition,
     };
 
-    // 7. Sorting presets
+    // 8. Sorting presets
     let orderBy: Prisma.ProductOrderByWithRelationInput[] = [];
     if (query.sort) {
       const sort = query.sort.trim().toLowerCase();
-      if (sort === 'popularity') {
+      if (sort === 'featured') {
+        orderBy = [
+          { isFeatured: 'desc' },
+          { popularityRank: 'desc' },
+          { createdAt: 'desc' },
+        ];
+      } else if (sort === 'popularity') {
         orderBy = [{ popularityRank: 'desc' }, { createdAt: 'desc' }];
       } else if (sort === 'price_asc' || sort === 'price_low_to_high') {
         orderBy = [{ priceUsd: 'asc' }];
@@ -566,7 +586,7 @@ export class StoreProductsService {
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const uploaded = await this.s3Service.uploadFile({
+        const uploaded = await this.cloudinaryService.uploadFile({
           fileBuffer: file.buffer,
           originalName: file.originalname,
           mimeType: file.mimetype,
@@ -663,7 +683,11 @@ export class StoreProductsService {
         await tx.productImage.createMany({
           data: newlyUploadedImages.map((img) => ({
             productId: id,
-            ...img,
+            key: img.key,
+            url: img.url,
+            alt: img.alt,
+            isPrimary: img.isPrimary,
+            sortOrder: img.sortOrder,
           })),
         });
       }
@@ -688,6 +712,7 @@ export class StoreProductsService {
             ? { availability: updatedAvailability }
             : {}),
           ...(dto.taxable !== undefined ? { taxable: dto.taxable } : {}),
+          ...(dto.isFeatured !== undefined ? { isFeatured: dto.isFeatured } : {}),
           ...(dto.shippingLabel !== undefined
             ? { shippingLabel: dto.shippingLabel?.trim() || null }
             : {}),
@@ -701,7 +726,7 @@ export class StoreProductsService {
 
       // Cleanup S3 files asynchronously after DB success
       if (imagesToDeleteS3Keys.length > 0) {
-        await this.s3Service.deleteFiles(imagesToDeleteS3Keys);
+        await this.cloudinaryService.deleteFiles(imagesToDeleteS3Keys);
       }
 
       await this.invalidateProductCache(updatedProduct.id, updatedProduct.sku);
@@ -744,7 +769,7 @@ export class StoreProductsService {
     });
 
     if (s3Keys.length > 0) {
-      await this.s3Service.deleteFiles(s3Keys);
+      await this.cloudinaryService.deleteFiles(s3Keys);
     }
 
     await this.invalidateProductCache(productId, product.sku);
@@ -805,7 +830,7 @@ export class StoreProductsService {
 
     // Delete image files from S3
     if (imageKeys.length > 0) {
-      await this.s3Service.deleteFiles(imageKeys);
+      await this.cloudinaryService.deleteFiles(imageKeys);
     }
 
     await this.invalidateProductCache(id, product.sku);

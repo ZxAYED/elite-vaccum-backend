@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import {
   AttachmentKind,
@@ -25,13 +26,13 @@ import { RedisService } from 'src/redis';
 import { CloudinaryUploadService } from 'src/storage/cloudinary-upload.service';
 import { FIXED_SERVICES_CATALOG } from './constants/services-catalog.constant';
 import { AddServiceRequestAttachmentDto } from './dto/add-service-request-attachment.dto';
-import { CreateServiceRequestDto } from './dto/create-service-request.dto';
-import { RejectServiceRequestDto } from './dto/reject-service-request.dto';
+import { CreateServiceRequestDto, normalizeSymptom } from './dto/create-service-request.dto';
+import { CancelServiceRequestDto, RejectServiceRequestDto } from './dto/reject-service-request.dto';
 import { ServiceRequestListQueryDto } from './dto/service-request-list-query.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
 
 @Injectable()
-export class ServiceRequestsService {
+export class ServiceRequestsService implements OnModuleInit {
   private readonly logger = new Logger(ServiceRequestsService.name);
 
   constructor(
@@ -40,6 +41,36 @@ export class ServiceRequestsService {
     private readonly redis: RedisService,
     private readonly notificationsService: NotificationsService,
   ) {}
+
+  async onModuleInit() {
+    try {
+      const acceptedQuotes = await this.prisma.quotation.findMany({
+        where: {
+          status: 'ACCEPTED',
+          serviceRequest: { status: ServiceRequestStatus.QUOTED },
+        },
+        select: {
+          serviceRequestId: true,
+          invoices: { select: { status: true } },
+          serviceRequest: { select: { appointments: { select: { id: true } } } },
+        },
+      });
+
+      for (const quote of acceptedQuotes) {
+        const hasAppointments = (quote.serviceRequest?.appointments?.length || 0) > 0;
+        await this.prisma.serviceRequest.update({
+          where: { id: quote.serviceRequestId },
+          data: {
+            status: hasAppointments
+              ? ServiceRequestStatus.SCHEDULED
+              : ServiceRequestStatus.ACCEPTED,
+          },
+        });
+      }
+    } catch (err: any) {
+      this.logger.warn(`Failed to auto-heal service request statuses: ${err.message}`);
+    }
+  }
 
   private async uploadMulterFiles(
     files: Array<Express.Multer.File>,
@@ -74,7 +105,7 @@ export class ServiceRequestsService {
     );
   }
 
-  private isAdmin(user?: RequestUser | null): boolean {
+  public isAdmin(user?: RequestUser | null): boolean {
     return user?.role === UserRole.ADMIN;
   }
 
@@ -191,33 +222,53 @@ export class ServiceRequestsService {
     return created.id;
   }
 
+  private readonly SLUG_ALIASES: Record<string, string> = {
+    maintenance: 'maintenance-troubleshooting',
+    repair: 'vacuum-repair',
+    installation: 'new-system',
+    upgrade: 'system-upgrade',
+    inspection: 'system-inspection',
+    'low-suction': 'low-suction-fix',
+    'broken-inlet': 'broken-inlet-repair',
+    general: 'general-service',
+    custom: 'custom-fit',
+  };
+
   /**
-   * Resolves or auto-creates the Service record in database by slug.
+   * Resolves or auto-creates the Service record in database by slug with alias fallback.
    */
   private async resolveService(serviceSlug: string) {
-    const slug = serviceSlug.toLowerCase().trim();
-    const existing = await this.prisma.service.findUnique({
-      where: { slug },
+    const raw = (serviceSlug || '').toLowerCase().trim();
+    const slug = this.SLUG_ALIASES[raw] || raw;
+
+    const existing = await this.prisma.service.findFirst({
+      where: {
+        OR: [
+          { slug: { equals: slug, mode: 'insensitive' } },
+          { slug: { equals: raw, mode: 'insensitive' } },
+          { name: { contains: raw, mode: 'insensitive' } },
+        ],
+      },
     });
     if (existing) return existing;
 
     const catalogItem = FIXED_SERVICES_CATALOG.find(
-      (s) => s.slug.toLowerCase() === slug,
+      (s) =>
+        s.slug.toLowerCase() === slug ||
+        s.slug.toLowerCase() === raw ||
+        s.title.toLowerCase().includes(raw),
     );
 
-    const title = catalogItem ? catalogItem.title : serviceSlug;
+    const title = catalogItem ? catalogItem.title : (serviceSlug || 'Central Vacuum Service');
     const group = catalogItem ? catalogItem.group : ServiceGroup.SERVICE_AND_MAINTENANCE;
     const desc = catalogItem ? catalogItem.description : 'Central vacuum service';
 
     return this.prisma.service.create({
       data: {
-        slug,
+        slug: catalogItem ? catalogItem.slug : slug,
         name: title,
         category: group,
         description: desc,
-        basePriceUsd: catalogItem?.basePriceUsd
-          ? new Prisma.Decimal(catalogItem.basePriceUsd)
-          : null,
         status: ServiceCatalogStatus.ACTIVE,
       },
     });
@@ -243,7 +294,6 @@ export class ServiceRequestsService {
           slug: true,
           name: true,
           category: true,
-          basePriceUsd: true,
         },
       },
       equipment: true,
@@ -276,13 +326,37 @@ export class ServiceRequestsService {
         },
       },
       quotations: {
-        select: {
-          id: true,
-          businessId: true,
-          status: true,
-          totalUsd: true,
-          expiresAt: true,
+        include: {
+          lineItems: {
+            orderBy: { sortOrder: 'asc' },
+          },
+          rejectionHistory: {
+            orderBy: { rejectedAt: 'desc' },
+          },
+          invoices: {
+            include: {
+              payments: true,
+              lineItems: true,
+            },
+            orderBy: { createdAt: 'desc' },
+          },
         },
+        orderBy: { createdAt: 'desc' },
+      },
+      invoices: {
+        include: {
+          payments: true,
+          lineItems: true,
+          quotation: {
+            select: {
+              id: true,
+              businessId: true,
+              status: true,
+              totalUsd: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
       },
     } satisfies Prisma.ServiceRequestInclude;
   }
@@ -291,32 +365,66 @@ export class ServiceRequestsService {
   // INTAKE & CREATION
 
 
-  private parseDateTime(dateStr: string, timeStr: string): Date {
-    const [year, month, day] = dateStr.split('-').map(Number);
-    const cleaned = timeStr.trim().toUpperCase();
-    const match = cleaned.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  private parseTimeWindow(dateStr: string, timeWindow: string): { startAt: Date; endAt: Date } {
+    const parts = (dateStr || '').split('-').map(Number);
+    const now = new Date();
+    const year = parts[0] || now.getUTCFullYear();
+    const month = parts[1] ? parts[1] - 1 : now.getUTCMonth();
+    const day = parts[2] || now.getUTCDate();
 
-    let hours = 9;
-    let minutes = 0;
+    // Match all time patterns: "5:00 PM", "09:00 AM", "5 PM", "17:00", "7:00 PM"
+    const timeMatches = Array.from(
+      (timeWindow || '').matchAll(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?/gi),
+    );
 
-    if (match) {
-      hours = Number(match[1]);
-      minutes = Number(match[2]);
-      const ampm = match[3];
+    let startHours = 9;
+    let startMinutes = 0;
+    let endHours = 11;
+    let endMinutes = 0;
 
-      if (ampm === 'PM' && hours < 12) hours += 12;
-      if (ampm === 'AM' && hours === 12) hours = 0;
+    if (timeMatches.length >= 1) {
+      const match1 = timeMatches[0];
+      let h1 = Number(match1[1]);
+      const m1 = match1[2] ? Number(match1[2]) : 0;
+      const ampm1 = match1[3]?.toUpperCase();
+
+      if (ampm1 === 'PM' && h1 < 12) h1 += 12;
+      if (ampm1 === 'AM' && h1 === 12) h1 = 0;
+      startHours = h1;
+      startMinutes = m1;
+      endHours = (h1 + 2) % 24;
     }
 
-    return new Date(Date.UTC(year, month - 1, day, hours, minutes, 0));
-  }
+    if (timeMatches.length >= 2) {
+      const match2 = timeMatches[1];
+      let h2 = Number(match2[1]);
+      const m2 = match2[2] ? Number(match2[2]) : 0;
+      const ampm2 = match2[3]?.toUpperCase();
 
-  private parseTimeWindow(dateStr: string, timeWindow: string): { startAt: Date; endAt: Date } {
-    const parts = timeWindow.split('-');
-    const startStr = (parts[0] || '09:00 AM').trim();
-    const endStr = (parts[1] || '11:00 AM').trim();
-    const startAt = this.parseDateTime(dateStr, startStr);
-    const endAt = this.parseDateTime(dateStr, endStr);
+      if (ampm2 === 'PM' && h2 < 12) h2 += 12;
+      if (ampm2 === 'AM' && h2 === 12) h2 = 0;
+      endHours = h2;
+      endMinutes = m2;
+    }
+
+    // Default heuristics if string has keywords
+    const lower = (timeWindow || '').toLowerCase();
+    if (timeMatches.length === 0) {
+      if (lower.includes('morning')) {
+        startHours = 9;
+        endHours = 11;
+      } else if (lower.includes('afternoon')) {
+        startHours = 13;
+        endHours = 15;
+      } else if (lower.includes('evening')) {
+        startHours = 17;
+        endHours = 19;
+      }
+    }
+
+    const startAt = new Date(Date.UTC(year, month, day, startHours, startMinutes, 0));
+    const endAt = new Date(Date.UTC(year, month, day, endHours, endMinutes, 0));
+
     return { startAt, endAt };
   }
 
@@ -365,12 +473,22 @@ export class ServiceRequestsService {
 
     const effectiveEmail = (user?.email || dto.email || '').trim().toLowerCase();
 
+    const effectiveProblemLocation = (
+      dto.problemLocation === 'Other' && dto.otherProblemLocation
+        ? dto.otherProblemLocation
+        : dto.problemLocation || dto.otherProblemLocation || null
+    )?.trim() || null;
+
+    const sanitizedSymptoms = (dto.symptoms || []).map((sym) =>
+      typeof sym === 'string' ? normalizeSymptom(sym) : sym,
+    );
+
     const serviceAddressSnapshot = {
       address: dto.address.trim(),
       city: dto.city.trim(),
       state: dto.state.trim(),
       zipCode: dto.zipCode.trim(),
-      problemLocation: dto.problemLocation?.trim() || null,
+      problemLocation: effectiveProblemLocation,
       contactName: dto.fullName.trim(),
       contactPhone: dto.phone.trim(),
       contactEmail: effectiveEmail,
@@ -393,16 +511,16 @@ export class ServiceRequestsService {
           serviceId: service.id,
           title,
           description: dto.problemDescription.trim(),
-          symptoms: dto.symptoms || [],
+          symptoms: sanitizedSymptoms,
           status: ServiceRequestStatus.SUBMITTED,
-          urgency: RequestUrgency.MEDIUM,
+          urgency: dto.urgency || RequestUrgency.MEDIUM,
           preferredDate: dto.preferredDate.trim(),
           preferredTime: dto.timeWindow.trim(),
           propertyLabel: `${dto.city}, ${dto.state}`.trim(),
           serviceAddress: serviceAddressSnapshot,
           requestedSchedule: requestedScheduleSnapshot,
           currentSchedule: requestedScheduleSnapshot,
-          problemLocation: dto.problemLocation?.trim() || null,
+          problemLocation: effectiveProblemLocation,
           additionalNotes: dto.additionalNotes?.trim() || null,
         },
       });
@@ -691,6 +809,23 @@ export class ServiceRequestsService {
       }
     }
 
+    if (request.status === ServiceRequestStatus.QUOTED) {
+      const hasAcceptedQuote = request.quotations?.some(
+        (q) => q.status === 'ACCEPTED',
+      );
+      if (hasAcceptedQuote) {
+        const hasAppointments = (request.appointments?.length || 0) > 0;
+        const targetStatus = hasAppointments
+          ? ServiceRequestStatus.SCHEDULED
+          : ServiceRequestStatus.ACCEPTED;
+        await this.prisma.serviceRequest.update({
+          where: { id: request.id },
+          data: { status: targetStatus },
+        });
+        request.status = targetStatus;
+      }
+    }
+
     return request;
   }
 
@@ -715,6 +850,7 @@ export class ServiceRequestsService {
       where: { id },
       data: {
         status: dto.status,
+        ...(dto.urgency ? { urgency: dto.urgency } : {}),
       },
       include: this.requestInclude(),
     });
@@ -845,5 +981,89 @@ export class ServiceRequestsService {
     });
 
     return this.getRequestDetails(id, user);
+  }
+
+  async deleteAttachment(
+    requestId: string,
+    attachmentId: string,
+    user: RequestUser,
+  ) {
+    const request = await this.getRequestDetails(requestId, user);
+    const attachment = await this.prisma.serviceRequestAttachment.findFirst({
+      where: {
+        id: attachmentId,
+        serviceRequestId: request.id,
+      },
+    });
+
+    if (!attachment) {
+      throw new NotFoundException('Attachment not found on this service request');
+    }
+
+    await this.prisma.serviceRequestAttachment.delete({
+      where: { id: attachment.id },
+    });
+
+    return {
+      success: true,
+      message: 'Attachment deleted successfully',
+    };
+  }
+
+  async cancelRequest(
+    id: string,
+    dto: CancelServiceRequestDto | undefined,
+    user: RequestUser,
+  ) {
+    const request = await this.getRequestDetails(id, user);
+
+    if (
+      request.status === ServiceRequestStatus.CANCELLED ||
+      request.status === ServiceRequestStatus.COMPLETED
+    ) {
+      throw new BadRequestException(
+        `Service request cannot be cancelled because it is already ${request.status}`,
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // Cancel associated appointments
+      await tx.appointment.updateMany({
+        where: {
+          serviceRequestId: request.id,
+          status: { notIn: ['CANCELLED', 'COMPLETED'] },
+        },
+        data: {
+          status: 'CANCELLED',
+          notes: dto?.reason
+            ? `Cancelled: ${dto.reason}`
+            : 'Cancelled by customer/admin',
+        },
+      });
+
+      const updated = await tx.serviceRequest.update({
+        where: { id: request.id },
+        data: {
+          status: ServiceRequestStatus.CANCELLED,
+          additionalNotes: dto?.reason
+            ? `${request.additionalNotes || ''}\n[Cancellation Reason: ${dto.reason}]`.trim()
+            : request.additionalNotes,
+        },
+        include: this.requestInclude(),
+      });
+
+      // Invalidate slots cache for preferredDate
+      if (request.preferredDate) {
+        this.redis
+          .deleteByPattern(`schedule:slots:${request.preferredDate}:*`)
+          .catch(() => {});
+      }
+
+      return {
+        success: true,
+        message: 'Service request cancelled successfully',
+        request: updated,
+      };
+    });
   }
 }

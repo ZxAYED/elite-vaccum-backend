@@ -328,22 +328,28 @@ All paginated GET endpoints follow this structure:
 
 ---
 
-## Phase 3: Products Catalog, Filtering & Media
+## Phase 3: Products Catalog, Filtering & Media (Unified 2-in-1 for Customer & Admin)
 
-### 3.1 Public Product Catalog & Search
+### 3.1 Unified Product Search, Filter & Inventory Listing (Customer & Admin 2-in-1)
 
 - **Endpoint**: `GET /products`
-- **Access**: `Public`
+- **Access**: `Public` *(Accessible to everyone; no token required for public storefront. Admin UI can query the exact same endpoint with `status=ALL` or specific status filters)*
 - **Query Parameters**:
-  - `search`: Search across name, description, SKU, and model.
-  - `categoryId`: Filter by category UUID.
-  - `categorySlug`: Filter by category slug (e.g. `central-vacuum-units`).
-  - `minPrice` / `maxPrice`: Numerical price boundaries.
-  - `brand`: Filter by manufacturer brand.
-  - `isFeatured`: `true` or `false`.
-  - `availability`: `IN_STOCK`, `LOW_STOCK`, `OUT_OF_STOCK`, `PREORDER`.
-  - `sort`: `price_asc`, `price_desc`, `newest`, `popular`, `name_asc`.
-  - `page` _(default 1)_, `limit` _(default 12)_.
+
+| Param          | Type      | Example                                | Description                                                                          |
+| :------------- | :-------- | :------------------------------------- | :----------------------------------------------------------------------------------- |
+| `status`       | `string`  | `?status=ALL`                          | `ACTIVE`, `DRAFT`, `ARCHIVED`, or `ALL` *(Default: `ACTIVE` for public visitors)*    |
+| `search`       | `string`  | `?search=motor`                        | Full-text search across name, model, SKU, summary, and description                  |
+| `category`     | `string`  | `?category=central-vacuum-units`       | Filter by category slug or UUID                                                      |
+| `isFeatured`   | `boolean` | `?isFeatured=true`                     | Filter only featured products (or `?isFeatured=false`)                               |
+| `availability` | `enum`    | `?availability=IN_STOCK`               | `IN_STOCK`, `LOW_STOCK`, `OUT_OF_STOCK`, `PREORDER`, `BACKORDER`, `DISCONTINUED`, `all` |
+| `priceRange`   | `string`  | `?priceRange=150-300`                  | Formats: `under_50`, `50-150`, `150-300`, `300+`                                     |
+| `minPrice`     | `number`  | `?minPrice=100`                        | Custom minimum price in USD                                                          |
+| `maxPrice`     | `number`  | `?maxPrice=1500`                       | Custom maximum price in USD                                                          |
+| `sortBy`       | `enum`    | `?sortBy=price_asc`                    | `featured`, `popularity`, `price_asc`, `price_desc`, `newest`, `name_asc`, `name_desc` |
+| `page`         | `number`  | `?page=1`                              | Pagination current page (default: `1`)                                               |
+| `limit`        | `number`  | `?limit=12`                            | Page size (default: `12`, max: `100`)                                                |
+
 - **Response `200 OK`**:
 
 ```json
@@ -355,13 +361,13 @@ All paginated GET endpoints follow this structure:
       "name": "Elite Pro Power Unit 850AW",
       "slug": "elite-pro-power-unit-850aw",
       "model": "EV-850",
-      "brand": "Elite",
       "priceUsd": "899.99",
-      "compareAtPriceUsd": "999.99",
       "quantity": 18,
       "availability": "IN_STOCK",
       "status": "ACTIVE",
+      "taxable": true,
       "isFeatured": true,
+      "shippingLabel": "Free Standard Shipping",
       "category": {
         "id": "2e6d4ef0-71e5-4e1c-8fcb-2cfd4a8c8ed6",
         "name": "Central Vacuum Units",
@@ -370,8 +376,18 @@ All paginated GET endpoints follow this structure:
       "images": [
         {
           "id": "img-01",
-          "url": "https://res.cloudinary.com/demo/image/upload/v1/ev-850.jpg",
+          "key": "elite-vacuum/products/1725184800-a1b2c3d4",
+          "url": "https://res.cloudinary.com/dhl04adhz/image/upload/v1725184800/elite-vacuum/products/1725184800-a1b2c3d4.jpg",
+          "alt": "Front view of Elite Pro 850AW",
           "isPrimary": true,
+          "sortOrder": 0
+        },
+        {
+          "id": "img-02",
+          "key": "elite-vacuum/products/1725184801-e5f6g7h8",
+          "url": "https://res.cloudinary.com/dhl04adhz/image/upload/v1725184801/elite-vacuum/products/1725184801-e5f6g7h8.jpg",
+          "alt": "Motor & filtration system diagram",
+          "isPrimary": false,
           "sortOrder": 1
         }
       ]
@@ -381,65 +397,121 @@ All paginated GET endpoints follow this structure:
 }
 ```
 
-### 3.2 Product Detail by ID or Slug
+### 3.2 Unified Product Detail by ID, SKU, or Slug
 
 - **Endpoint**: `GET /products/:id` (Accepts UUID, SKU `PROD-...`, or Slug `elite-pro-...`)
-- **Access**: `Public`
+- **Access**: `Public` *(Works for both Customer product page and Admin edit screen)*
+- **Response**: Full product payload including `highlights`, `specifications`, `shippingNotes`, `isFeatured`, and `images` array containing `id`, `key` (Cloudinary public ID), `url`, `alt`, `isPrimary`, `sortOrder`.
 
-### 3.3 Admin Product List (Full Visibility)
+### 3.3 Customer Get Own Review for Product (by Token)
 
-- **Endpoint**: `GET /products/admin/list`
-- **Access**: `ADMIN`
-- **Query Parameters**: Same as public catalog + status filter (`DRAFT`, `ACTIVE`, `ARCHIVED`).
-- **Response `200 OK`**: Returns full inventory listing with total cost, margin, and stock warnings.
+- **Endpoint**: `GET /products/:id/my-review`
+- **Access**: `CUSTOMER` *(Requires Bearer JWT token)*
+- **Parameters**: `id` — accepts UUID, SKU `PROD-...`, or model number
+- **Response `200 OK`**:
+```json
+{
+  "hasReviewed": true,
+  "product": {
+    "id": "43924fd1-10c0-43b9-a619-fa89a42530ec",
+    "name": "Elite Pro Power Unit 850AW",
+    "sku": "PROD-202608-A19",
+    "model": "EV-850",
+    "priceUsd": 899.99,
+    "primaryImage": {
+      "id": "img-01",
+      "key": "elite-vacuum/products/1725184800-a1b2c3d4",
+      "url": "https://res.cloudinary.com/dhl04adhz/image/upload/v1725184800/elite-vacuum/products/1725184800-a1b2c3d4.jpg",
+      "alt": "Front view of Elite Pro 850AW",
+      "isPrimary": true
+    }
+  },
+  "review": {
+    "id": "2e1d7390-2c70-4f59-8669-9c59508d82ef",
+    "rating": 5,
+    "title": "Incredible Power & Whisper Quiet",
+    "body": "Installed this in our 3,500 sq ft home. Cleans pet hair effortlessly.",
+    "preview": "Installed this in our 3,500 sq ft home...",
+    "status": "PUBLISHED",
+    "submittedAt": "2026-08-25T14:30:00.000Z",
+    "publishedAt": "2026-08-25T14:30:00.000Z"
+  }
+}
+```
 
-### 3.4 Admin Product Creation (Multipart with Images)
+### 3.4 Product Enums Reference
+
+| Enum Name | Values | Description |
+| :--- | :--- | :--- |
+| **`ProductAvailability`** | `IN_STOCK`, `LOW_STOCK`, `OUT_OF_STOCK`, `PREORDER`, `BACKORDER`, `DISCONTINUED` | Live inventory readiness state. |
+| **`ProductStatus`** | `DRAFT`, `ACTIVE`, `ARCHIVED` | Catalog visibility status. |
+
+### 3.5 Admin Product Creation (Multipart FormData with Cloudinary Upload)
 
 - **Endpoint**: `POST /products`
 - **Access**: `ADMIN`
 - **Content-Type**: `multipart/form-data`
-- **Fields**:
-  - `data` _(stringified JSON)_:
+- **How it works**:
+  1. Frontend constructs standard `FormData` and appends binary image files to key `images` (up to 10 files).
+  2. Backend receives files, uploads them to Cloudinary under the `products` folder, and retrieves `{ key: public_id, url: secure_url }`.
+  3. The database saves `key`, `url`, `alt`, `isPrimary`, `sortOrder` in the `product_images` table.
+  4. Returns the created product with `images` array of objects.
+
+- **FormData Payload Example**:
+  - `data` *(stringified JSON of CreateProductDto)*:
     ```json
     {
-      "name": "Elite Pro Power Unit 850AW",
-      "slug": "elite-pro-power-unit-850aw",
-      "model": "EV-850",
-      "brand": "Elite",
-      "price": 899.99,
-      "stock": 25,
       "categoryId": "2e6d4ef0-71e5-4e1c-8fcb-2cfd4a8c8ed6",
-      "description": "Quiet, commercial-grade 850 air-watt motor with hybrid HEPA filtration.",
-      "isFeatured": true
+      "name": "Elite Pro Power Unit 850AW",
+      "model": "EV-850",
+      "summary": "Quiet, commercial-grade 850 air-watt motor with hybrid HEPA filtration.",
+      "description": "Full rich description of the power unit...",
+      "priceUsd": 899.99,
+      "quantity": 25,
+      "status": "ACTIVE",
+      "availability": "IN_STOCK",
+      "taxable": true,
+      "isFeatured": true,
+      "shippingLabel": "Free Standard Shipping",
+      "highlights": [
+        { "text": "Ultra-quiet 58 dB sound level", "sortOrder": 0 },
+        { "text": "850 Air Watts maximum suction", "sortOrder": 1 }
+      ],
+      "specifications": [
+        { "label": "Motor", "value": "Dual-Stage 120V", "sortOrder": 0 },
+        { "label": "Air Watts", "value": "850 AW", "sortOrder": 1 }
+      ]
     }
     ```
-  - `images`: Binary file attachments (JPEG, PNG, WEBP; max 10 files directly uploaded to Cloudinary).
+  - `images`: Binary file attachments (`formData.append('images', file1); formData.append('images', file2);`).
 
-### 3.5 Admin Unified Product Update (Multipart with Image Management)
+### 3.5 Admin Unified Product Update & Image Deletion
 
 - **Endpoint**: `PATCH /products/:id`
 - **Access**: `ADMIN`
 - **Content-Type**: `multipart/form-data`
 - **Fields**:
-  - `data` _(stringified JSON of UpdateProductDto)_:
+  - `data` *(stringified JSON of UpdateProductDto)*:
     ```json
     {
-      "price": 849.99,
-      "stock": 30,
-      "deleteImageIds": ["old-image-uuid-1", "old-image-uuid-2"]
+      "priceUsd": 849.99,
+      "quantity": 30,
+      "isFeatured": true,
+      "deleteImageIds": ["img-uuid-01", "img-uuid-02"]
     }
     ```
-  - `images`: Optional new binary photo files to append to the product gallery.
+  - `images`: Optional new binary photo files (up to 10) to upload to Cloudinary and append to the product gallery.
+  - **Cloudinary Cleanup**: When `deleteImageIds` are provided, the backend queries the stored `key` (public_id) for each image and purges them from Cloudinary while deleting the database records.
 
 ### 3.6 Admin Quick Stock & Status Updates
 
 - **Update Stock**: `PATCH /products/:id/stock` with `{"stock": 40}`
 - **Update Status**: `PATCH /products/:id/status` with `{"status": "ACTIVE", "availability": "IN_STOCK"}`
 
-### 3.7 Admin Delete Product & Images
+### 3.7 Admin Delete Product & Batch Image Removal
 
-- **Delete Product**: `DELETE /products/:id` (`ADMIN` — Safely archives if historical order rows exist, or permanently purges if unpurchased)
-- **Delete Multiple Images**: `DELETE /products/:id/images` with `{"imageIds": ["uuid-1", "uuid-2"]}`
+- **Delete Product**: `DELETE /products/:id` (`ADMIN` — Safely archives if historical order rows exist, or permanently purges from DB and purges all photos from Cloudinary if unpurchased)
+- **Delete Multiple Images**: `DELETE /products/:id/images` with `{"imageIds": ["img-uuid-01", "img-uuid-02"]}` (Removes DB rows and purges assets from Cloudinary)
 - **Delete Single Image**: `DELETE /products/:id/images/:imageId`
 
 ---
@@ -550,13 +622,13 @@ The cart is tied to the customer's authenticated account and handles real-time s
 [
   {
     "id": "addr-uuid-01",
-    "fullName": "Jane Doe",
-    "street": "742 Evergreen Terrace",
-    "apartment": "Apt 4B",
+    "label": "Home",
+    "line1": "742 Evergreen Terrace",
+    "line2": "Apt 4B",
     "city": "Springfield",
     "state": "OR",
-    "zipCode": "97477",
-    "phone": "+15552345678",
+    "postalCode": "97477",
+    "country": "USA",
     "isDefault": true
   }
 ]
@@ -570,13 +642,13 @@ The cart is tied to the customer's authenticated account and handles real-time s
 
 ```json
 {
-  "fullName": "Jane Doe",
-  "street": "742 Evergreen Terrace",
-  "apartment": "Apt 4B",
+  "label": "Home",
+  "line1": "742 Evergreen Terrace",
+  "line2": "Apt 4B",
   "city": "Springfield",
   "state": "OR",
-  "zipCode": "97477",
-  "phone": "+15552345678",
+  "postalCode": "97477",
+  "country": "USA",
   "isDefault": true
 }
 ```
@@ -624,14 +696,14 @@ The cart is tied to the customer's authenticated account and handles real-time s
 ```json
 {
   "deliveryAddressId": "addr-uuid-01",
-  "paymentMethod": "CARD",
+  "paymentMethod": "STRIPE",
   "customerNotes": "Please leave on front porch behind pillar"
 }
 ```
 
-_(Options for `paymentMethod`: `CARD`, `COD` (Cash on Delivery), `CHECK`, `BANK_TRANSFER`)_
+*(Options for `paymentMethod`: `STRIPE`, `COD` (Cash on Delivery))*
 
-- **Response `201 Created` (When `paymentMethod: "CARD"`)**:
+- **Response `201 Created` (When `paymentMethod: "STRIPE"`)**:
 
 ```json
 {
@@ -698,7 +770,7 @@ _(Options for `paymentMethod`: `CARD`, `COD` (Cash on Delivery), `CHECK`, `BANK_
   "status": "SHIPPED",
   "shippingProvider": "UPS Ground",
   "trackingNumber": "1Z9999999999999999",
-  "note": "Dispatched from central distribution hub"
+  "notes": "Dispatched from central distribution hub"
 }
 ```
 
@@ -706,7 +778,7 @@ _(Options for `paymentMethod`: `CARD`, `COD` (Cash on Delivery), `CHECK`, `BANK_
 
 - **Submit Return Request**: `POST /store/returns/orders/:orderId`
   - **Access**: `CUSTOMER` (only on `DELIVERED` orders)
-  - **Body**: `{"reason": "DEFECTIVE", "customerNotes": "Power unit has an internal electrical short."}`
+  - **Body**: `{"reason": "DEFECTIVE_OR_DAMAGED", "customerNote": "Power unit has an internal electrical short."}`
 - **Get Return Status**: `GET /store/returns/orders/:orderId`
   - **Access**: `CUSTOMER`, `ADMIN`
 - **Admin Approve Return & Process Refund**: `PATCH /store/returns/orders/:orderId/refund`
@@ -724,41 +796,250 @@ _(Options for `paymentMethod`: `CARD`, `COD` (Cash on Delivery), `CHECK`, `BANK_
 
 ## Phase 7: Central Vacuum Services Catalog & Scheduling
 
-### 7.1 List Categorized Services
+### 7.1 List Categorized Services (Unified 2-in-1 for Customer & Admin)
 
 - **Endpoint**: `GET /services`
 - **Access**: `Public`
-- **Response `200 OK`**: Returns fixed service offerings grouped into `SERVICE_AND_MAINTENANCE` and `INSTALLATION` with symptom checklists and baseline pricing.
+- **Response `200 OK`**: Returns fixed service offerings grouped into `SERVICE_AND_MAINTENANCE` and `INSTALLATION` with recommended symptom checklists (Services do not carry price tags; pricing is determined dynamically via custom quotations).
+
+```json
+{
+  "groups": [
+    {
+      "group": "SERVICE_AND_MAINTENANCE",
+      "label": "Service & Maintenance",
+      "services": [
+        {
+          "id": "vacuum-repair",
+          "key": "VACUUM_REPAIR",
+          "slug": "vacuum-repair",
+          "group": "SERVICE_AND_MAINTENANCE",
+          "title": "Vacuum Repair",
+          "iconKey": "Wrench",
+          "summary": "Diagnostics and repair for suction loss, motor noise, and inlet issues.",
+          "description": "Expert comprehensive diagnostic and field repair service for all central vacuum power units, piping lines, motor carbon brushes, and circuit board failures.",
+          "sortOrder": 1,
+          "recommendedSymptoms": [
+            "UNIT_NOT_TURNING_ON",
+            "UNIT_DOES_NOT_SHUT_OFF",
+            "NOISE",
+            "OTHER"
+          ],
+          "status": "ACTIVE"
+        }
+      ]
+    },
+    {
+      "group": "INSTALLATION",
+      "label": "Installation",
+      "services": [
+        {
+          "id": "new-system",
+          "key": "NEW_SYSTEM",
+          "slug": "new-system",
+          "group": "INSTALLATION",
+          "title": "New System",
+          "iconKey": "Home",
+          "summary": "Full blueprinting and installation for new home constructions.",
+          "description": "Turnkey engineering and installation of complete central vacuum systems during framing or rough-in construction phases with lifetime piping warranty.",
+          "sortOrder": 7,
+          "recommendedSymptoms": [],
+          "status": "ACTIVE"
+        }
+      ]
+    }
+  ],
+  "symptoms": [
+    { "key": "UNIT_NOT_TURNING_ON", "label": "Unit not turning on" },
+    { "key": "UNIT_DOES_NOT_SHUT_OFF", "label": "Unit does not shut off" },
+    { "key": "CLOGGED", "label": "Clogged" },
+    { "key": "LOW_SUCTION", "label": "Low suction" },
+    { "key": "WALL_OR_POWER_HOSE_PROBLEM", "label": "Wall or power hose problem" },
+    { "key": "BROKEN_INLET", "label": "Broken inlet" },
+    { "key": "NOISE", "label": "Noise" },
+    { "key": "OTHER", "label": "Other" }
+  ]
+}
+```
 
 ### 7.2 Get Service Details by Slug
 
 - **Endpoint**: `GET /services/:slug` (e.g. `/services/vacuum-repair`)
 - **Access**: `Public`
+- **Response `200 OK`**:
+```json
+{
+  "data": {
+    "id": "vacuum-repair",
+    "key": "VACUUM_REPAIR",
+    "slug": "vacuum-repair",
+    "group": "SERVICE_AND_MAINTENANCE",
+    "title": "Vacuum Repair",
+    "iconKey": "Wrench",
+    "summary": "Diagnostics and repair for suction loss, motor noise, and inlet issues.",
+    "description": "Expert comprehensive diagnostic and field repair service for all central vacuum power units, piping lines, motor carbon brushes, and circuit board failures.",
+    "sortOrder": 1,
+    "recommendedSymptoms": [
+      "UNIT_NOT_TURNING_ON",
+      "UNIT_DOES_NOT_SHUT_OFF",
+      "NOISE",
+      "OTHER"
+    ],
+    "status": "ACTIVE",
+    "symptoms": [
+      { "key": "UNIT_NOT_TURNING_ON", "label": "Unit not turning on" },
+      { "key": "UNIT_DOES_NOT_SHUT_OFF", "label": "Unit does not shut off" },
+      { "key": "CLOGGED", "label": "Clogged" },
+      { "key": "LOW_SUCTION", "label": "Low suction" },
+      { "key": "WALL_OR_POWER_HOSE_PROBLEM", "label": "Wall or power hose problem" },
+      { "key": "BROKEN_INLET", "label": "Broken inlet" },
+      { "key": "NOISE", "label": "Noise" },
+      { "key": "OTHER", "label": "Other" }
+    ]
+  }
+}
+```
 
-### 7.3 Check Available Booking Slots (Real-Time Slot Engine)
+---
+
+### 7.3 Admin Create Service Offering
+
+- **Endpoint**: `POST /services`
+- **Access**: `ADMIN`
+- **Note on `slug`**: Frontend does **NOT** need to send or generate a `slug`. The backend automatically generates a clean URL-safe slug from `title` and auto-deduplicates if a collision exists.
+- **Request Body**:
+```json
+{
+  "title": "Commercial Vacuum Maintenance",
+  "group": "SERVICE_AND_MAINTENANCE",
+  "summary": "Full maintenance contracts for commercial facilities and healthcare installations.",
+  "description": "Multi-point motor diagnostic, line depressurization tests, and industrial filter core replacements.",
+  "iconKey": "Building2",
+  "sortOrder": 8,
+  "recommendedSymptoms": ["LOW_SUCTION", "NOISE"],
+  "status": "ACTIVE"
+}
+```
+- **Response `201 Created`**: Returns created service with auto-generated `slug` (e.g. `"commercial-vacuum-maintenance"`) and invalidates catalog cache.
+
+### 7.4 Admin Update Service Offering
+
+- **Endpoint**: `PATCH /services/:id` (Accepts UUID or slug)
+- **Access**: `ADMIN`
+- **Request Body**:
+```json
+{
+  "title": "Commercial Vacuum System Maintenance",
+  "summary": "Updated commercial service scope.",
+  "status": "ACTIVE",
+  "sortOrder": 9
+}
+```
+- **Response `200 OK`**: Returns updated service.
+
+### 7.5 Admin Delete or Deactivate Service
+
+- **Endpoint**: `DELETE /services/:id` (Accepts UUID or slug)
+- **Access**: `ADMIN`
+- **Behavior**:
+  - If no historical service requests reference this service, it is permanently deleted.
+  - If existing service requests reference this service, it is automatically soft-deactivated to `INACTIVE` to protect intake history integrity.
+- **Response `200 OK`**:
+```json
+{
+  "success": true,
+  "message": "Service 'Commercial Vacuum Maintenance' deleted successfully."
+}
+```
+
+### 7.6 List All Services Flat (Unified 2-in-1 with Counts)
+
+- **Endpoint**: `GET /services/list/all`
+- **Access**: `Public` / `ADMIN`
+- **Response `200 OK`**: Returns flat array of all services including `requestCount`, `reviewCount`, and `status`.
+
+### 7.7 Check Available Booking Slots (Real-Time Slot Engine)
 
 - **Endpoint**: `GET /schedule/slots`
 - **Access**: `Public` / `CUSTOMER`
-- **Query Parameters**: `date=YYYY-MM-DD` (e.g. `?date=2026-09-15`)
+- **Query Parameters**: `date=YYYY-MM-DD` (e.g. `?date=2026-08-20`)
+- **Behavior**: Always returns the **5 fixed static time slots** with dynamic `isBooked` (`true` / `false`), `status` (`FREE` / `BOOKED`), and `availableCapacity` based on active field technician availability and existing appointments.
 - **Response `200 OK`**:
 
 ```json
 {
-  "date": "2026-09-15",
+  "success": true,
+  "date": "2026-08-20",
+  "totalSlots": 5,
+  "availableSlotsCount": 4,
+  "bookedSlotsCount": 1,
   "slots": [
     {
-      "timeWindow": "09:00 AM - 11:00 AM",
-      "startTime": "09:00",
-      "endTime": "11:00",
+      "slot": "Morning - 8:00 AM to 11:00 AM",
+      "label": "Morning - 8:00 AM to 11:00 AM",
+      "timeWindow": "Morning - 8:00 AM to 11:00 AM",
+      "period": "MORNING",
+      "startTime": "08:00 AM",
+      "endTime": "11:00 AM",
       "isBooked": false,
-      "status": "FREE"
+      "status": "FREE",
+      "bookedCount": 0,
+      "availableCapacity": 3,
+      "availableTechnicians": [
+        { "id": "tech-uuid-01", "displayName": "Dave Miller", "phone": "+1-555-0199" }
+      ]
     },
     {
-      "timeWindow": "11:00 AM - 01:00 PM",
-      "startTime": "11:00",
-      "endTime": "13:00",
+      "slot": "Midday - 11:00 AM to 2:00 PM",
+      "label": "Midday - 11:00 AM to 2:00 PM",
+      "timeWindow": "Midday - 11:00 AM to 2:00 PM",
+      "period": "MIDDAY",
+      "startTime": "11:00 AM",
+      "endTime": "02:00 PM",
+      "isBooked": false,
+      "status": "FREE",
+      "bookedCount": 0,
+      "availableCapacity": 3,
+      "availableTechnicians": [ ... ]
+    },
+    {
+      "slot": "Afternoon - 2:00 PM to 5:00 PM",
+      "label": "Afternoon - 2:00 PM to 5:00 PM",
+      "timeWindow": "Afternoon - 2:00 PM to 5:00 PM",
+      "period": "AFTERNOON",
+      "startTime": "02:00 PM",
+      "endTime": "05:00 PM",
       "isBooked": true,
-      "status": "BOOKED"
+      "status": "BOOKED",
+      "bookedCount": 3,
+      "availableCapacity": 0,
+      "availableTechnicians": []
+    },
+    {
+      "slot": "Evening - 5:00 PM to 7:00 PM",
+      "label": "Evening - 5:00 PM to 7:00 PM",
+      "timeWindow": "Evening - 5:00 PM to 7:00 PM",
+      "period": "EVENING",
+      "startTime": "05:00 PM",
+      "endTime": "07:00 PM",
+      "isBooked": false,
+      "status": "FREE",
+      "bookedCount": 0,
+      "availableCapacity": 3,
+      "availableTechnicians": [ ... ]
+    },
+    {
+      "slot": "Late Evening - 7:00 PM to 9:00 PM",
+      "label": "Late Evening - 7:00 PM to 9:00 PM",
+      "timeWindow": "Late Evening - 7:00 PM to 9:00 PM",
+      "period": "LATE_EVENING",
+      "startTime": "07:00 PM",
+      "endTime": "09:00 PM",
+      "isBooked": false,
+      "status": "FREE",
+      "bookedCount": 0,
+      "availableCapacity": 3,
+      "availableTechnicians": [ ... ]
     }
   ]
 }
@@ -828,8 +1109,10 @@ _(Options for `paymentMethod`: `CARD`, `COD` (Cash on Delivery), `CHECK`, `BANK_
       "state": "OR",
       "zipCode": "97477",
       "problemLocation": "2nd Floor Master Bedroom Inlet",
+      "otherProblemLocation": "",
       "preferredDate": "2026-09-15",
       "timeWindow": "10:00 AM - 12:00 PM",
+      "urgency": "MEDIUM",
       "problemDescription": "Inlet valve clicks open but provides no suction.",
       "symptoms": ["LOW_SUCTION"],
       "manufacturer": "Beam",
@@ -840,23 +1123,38 @@ _(Options for `paymentMethod`: `CARD`, `COD` (Cash on Delivery), `CHECK`, `BANK_
   - `attachments`: File uploads (Photos/Videos/Inlet photos directly uploaded to Cloudinary).
 - **Response `201 Created`**: Returns created request with generated `businessId` (e.g. `REQ-2026-0089`).
 
-### 8.2 Customer Service Requests History
+### 8.2 List Service Requests (Unified 2-in-1 API for Customer & Admin)
 
-- **Endpoint**: `GET /service-requests/me`
-- **Access**: `CUSTOMER`
-- **Query Parameters**: `status`, `page`, `limit`
+- **Endpoint**: `GET /service-requests` (also available as `GET /service-requests/me` for dedicated customer portal)
+- **Access**: `CUSTOMER` / `ADMIN` / `TECHNICIAN`
+- **Behavior**:
+  - **For Customers**: Automatically returns only their own submitted & active requests.
+  - **For Admins**: Returns all requests across the system with searchable triage, status filters, and live aggregated KPI counts (`submitted`, `underReview`, `accepted`, `rejected`, `scheduled`).
+- **Query Parameters**:
+  - `status`: Filter by status (`SUBMITTED`, `UNDER_REVIEW`, `ACCEPTED`, `REJECTED`, `SCHEDULED`, `CANCELLED`)
+  - `urgency`: Filter by urgency (`LOW`, `MEDIUM`, `HIGH`, `EMERGENCY`)
+  - `serviceSlug`: Filter by fixed service slug (e.g. `vacuum-repair`)
+  - `search`: Search across Request ID, Title, Customer Name, Email, or Phone
+  - `page`: Page number (default: `1`)
+  - `limit`: Items per page (default: `10`)
 
-### 8.3 Admin Triage & KPI Search List
+### 8.3 Get Service Request Full Details
 
-- **Endpoint**: `GET /service-requests`
-- **Access**: `ADMIN`
-- **Query Parameters**: `search`, `status`, `urgency`, `page`, `limit`
-- **Response `200 OK`**: Paginated list + KPI counts (`submitted`, `underReview`, `quoted`, `accepted`, `scheduled`, `rejected`).
+- **Endpoint**: `GET /service-requests/:id` (Accepts UUID e.g. `c08e5621-...` or Business ID `REQ-XXXXX` / `SR-XXXXX`)
+- **Access**: `CUSTOMER` (own requests), `ADMIN`, `TECHNICIAN`
+- **Response `200 OK`**: Returns full object including `service`, `serviceAddress`, `equipment`, `attachments`, `appointments` (with assigned technician), `quotations`, `serviceOrder`, and `rejectionHistory`.
 
-### 8.4 Get Service Request Details
+### 8.4 Customer / Admin Cancel Service Request
 
-- **Endpoint**: `GET /service-requests/:id` (Accepts UUID or `REQ-XXXXX`)
-- **Access**: `CUSTOMER`, `ADMIN`, `TECHNICIAN`
+- **Endpoint**: `POST /service-requests/:id/cancel` (also supports `PATCH /service-requests/:id/cancel`)
+- **Access**: `CUSTOMER` (while pending), `ADMIN`
+- **Request Body** *(Optional)*:
+  ```json
+  {
+    "reason": "Rescheduled project for next season"
+  }
+  ```
+- **Behavior**: Cancels the request, frees the reserved technician appointment slot in the schedule engine, and invalidates slot caches.
 
 ### 8.5 Admin Update Service Request Status
 
@@ -874,126 +1172,335 @@ _(Options for `paymentMethod`: `CARD`, `COD` (Cash on Delivery), `CHECK`, `BANK_
 
 - **Endpoint**: `POST /service-requests/:id/attachments`
 - **Access**: `CUSTOMER`, `ADMIN`
-- **Content-Type**: `multipart/form-data` with `attachments` files.
+- **Content-Type**: `multipart/form-data` with `attachments` files (photos, videos, docs uploaded directly to Cloudinary).
+
+### 8.8 Delete Attachment from Service Request
+
+- **Endpoint**: `DELETE /service-requests/:id/attachments/:attachmentId`
+- **Access**: `CUSTOMER` (own requests), `ADMIN`
+- **Response `200 OK`**: `{"success": true, "message": "Attachment deleted successfully"}`
+
+### 8.9 Admin Reschedule Service Appointment
+
+- **Endpoint**: `PATCH /service-requests/:id/schedule`
+- **Access**: `ADMIN`
+- **Headers**: `Authorization: Bearer <ADMIN_TOKEN>`
+- **Request Body**:
+  ```json
+  {
+    "date": "2026-09-20",
+    "startTime": "01:00 PM",
+    "endTime": "03:00 PM",
+    "technicianId": "c72a7fa8-8924-4f01-a7eb-6237c569ef83",
+    "adminNote": "Customer requested moving to afternoon shift due to work schedule."
+  }
+  ```
+- **Behavior**:
+  - Validates technician availability and prevents double-booking.
+  - Updates the active `Appointment` record and sets status to `RESCHEDULED`.
+  - Updates `ServiceRequest.currentSchedule` while preserving `requestedSchedule` (the permanent original customer intake request).
+  - Invalidates Redis slot caches for both the old date and the new date.
+  - Automatically sends a real-time notification and email to the customer.
 
 ---
 
-## Phase 9: Quotations & Customer Approval
+---
 
-### 9.1 Admin List Quotations with KPIs
+---
 
-- **Endpoint**: `GET /quotations`
-- **Access**: `ADMIN`
-- **Query Parameters**: `status`, `search`, `page`, `limit`
+## Phase 9: Quotations (Service Request Sub-System)
 
-### 9.2 Customer List Own Received Quotations
+> [!IMPORTANT]
+> **Architecture & Independence Rules**:
+> 1. **Schedule Date vs. Quotation Expiration Date (`expiresAt`) are Independent**:
+>    - The customer's scheduled service date (`preferredDate`, `currentSchedule`, and `Appointment.startAt`) is **NEVER** modified when creating or revising a quotation.
+>    - `expiresAt` is strictly the validity deadline for quotation pricing. If `expiresAt` passes without payment, the quotation status transitions to `EXPIRED`.
+>    - The scheduled service appointment remains intact unless the admin or customer explicitly reschedules or cancels it.
+> 2. **Quotations are a sub-system of Service Requests**: Frontend does **not** need a standalone page for quotations.
+> 3. **Single Active Quotation Rule**: Only **one active quotation at a time** is permitted per service request. If an existing quote is `SENT` or `DRAFT`, creating another is blocked. Once a quotation has been **REJECTED**, has **EXPIRED**, or has been **DELETED**, the admin can create a new one.
+> 4. **Admin Edit & Delete**: Admins can modify an existing quotation (`PATCH /quotations/:id`) or delete it (`DELETE /service-requests/:id/quotation`). Deleting resets status to `UNDER_REVIEW`.
 
-- **Endpoint**: `GET /quotations/me`
-- **Access**: `CUSTOMER`
+---
 
-### 9.3 View Quotation Details
+### 9.0 Complete End-to-End Workflow & Frontend Implementation Blueprint
 
-- **Endpoint**: `GET /quotations/:id` (Accepts UUID or `QUO-XXXXX`)
-- **Access**: `CUSTOMER`, `ADMIN`
+#### 🔄 Complete Lifecycle Flowchart
+```mermaid
+flowchart TD
+    A[Customer Submits Service Request\nPOST /service-requests] --> B[Request Status: SUBMITTED\nSlot reserved in Schedule Engine]
+    B --> C[Admin Triage & Review\nGET /service-requests/:id]
+    C -->|Optional| D[Admin Updates Status to UNDER_REVIEW\nPATCH /service-requests/:id/status]
+    C --> E[Admin Creates Itemized Quotation\nPOST /service-requests/:id/quotation]
+    D --> E
+    E --> F[Request Status: QUOTED\nQuotation Status: SENT\nCustomer receives Email Notification]
+    F --> G[Customer Reviews Quote on Details Page\nGET /service-requests/:id]
+    
+    G -->|Customer Accepts| H[POST /quotations/:id/accept]
+    H --> I[Returns checkoutUrl & sessionId\nQuotation Status: ACCEPTED]
+    I --> J1[Customer Completes Stripe Checkout]
+    J1 --> J2[Stripe Webhook: checkout.session.completed]
+    J2 --> J3[Service Order Created: SCHEDULED\nInvoice Created: PAID\nPayment Recorded]
+    
+    G -->|Customer Rejects| J[POST /quotations/:id/reject\nwith reason]
+    J --> K[Quotation Status: REJECTED\nAudit logged in QuotationRejection\nAdmin unblocked to issue revised quote]
+    K --> E
+    
+    G -->|Quotation Expired| L[expiresAt Date Passed\nAuto-status: EXPIRED\nAdmin unblocked to issue fresh quote]
+    L --> E
+    
+    F -->|Admin Modifies| M[Admin Edits Line Items\nPATCH /quotations/:id\nIncrements version]
+    F -->|Admin Deletes| N[Admin Deletes Quote\nDELETE /service-requests/:id/quotation\nRequest resets to UNDER_REVIEW]
+    N --> E
+```
+
+---
+
+#### 📱 Frontend Screen-by-Screen Implementation Guide
+
+##### 1. Intake Form: `components/landing/service/request/ServiceRequestForm.tsx`
+- **Catalog Population**: Call `GET /services` on mount to display categorized service choices and default symptoms.
+- **Date & Slot Picker**: When the customer picks a date, call `GET /schedule/slots?date=YYYY-MM-DD`. Render the **5 static slots** (`Morning - 8:00 AM to 11:00 AM`, `Midday - 11:00 AM to 2:00 PM`, etc.). Disable slots where `isBooked: true`.
+- **Form Submission**: Post `multipart/form-data` with `data` (stringified JSON) and `attachments` (binary files).
+- **Redirection**: On `201 Created`, route to customer dashboard: `/user/services/${res.data.id}`.
+
+##### 2. Customer Details View: `app/(dashboard)/user/services/[requestId]/page.tsx`
+- **Data Fetching**: Call `GET /service-requests/:id` (which returns request info, equipment, address, attachments, and `quotations` array).
+- **Quotation Sub-System Component**:
+  - **Case A: No Quotation Yet** (`status === 'SUBMITTED' || status === 'UNDER_REVIEW'`):
+    - Render banner: *"Our technicians are evaluating your request. An itemized quote will appear here shortly."*
+  - **Case B: Quotation Received** (`status === 'QUOTED'` and `quotations[0].status === 'SENT'`):
+    - Render prominent **Quotation Card**:
+      - Total Amount (`totalUsd`), Subtotal, Discount, Tax.
+      - Itemized Table: Description, Quantity, Unit Price, Total, Note.
+      - Terms & Notes section.
+      - Expiration notice: *"Offer valid until {expiresAt}"*.
+      - **Action Buttons**:
+        - **"Accept Quotation"** (Primary Green Button): Calls `POST /quotations/${quotation.id}/accept`. On success, reloads request; automatically switches to `SCHEDULED` with linked Service Order details.
+        - **"Decline / Request Revision"** (Outline Red Button): Opens modal with `reason` dropdown + comments textarea. Calls `POST /quotations/${quotation.id}/reject`.
+  - **Case C: Quotation Accepted** (`quotations[0].status === 'ACCEPTED'`):
+    - Render green success banner: *"Quotation Accepted & Service Order Scheduled!"*
+    - Display scheduled appointment time and technician info from `appointments` or `serviceOrder`.
+  - **Case D: Quotation Declined** (`quotations[0].status === 'REJECTED'`):
+    - Render neutral banner: *"You declined this quotation on {rejectedAt}. Reason: {reason}. Our service manager will review and provide an updated estimate."*
+  - **Case E: Quotation Expired** (`quotations[0].status === 'EXPIRED'`):
+    - Render amber alert: *"This quotation expired on {expiresAt}. Please contact support or await a refreshed quote."*
+
+##### 3. Admin Details View: `app/(dashboard)/admin/service-requests/[requestId]/page.tsx`
+- **Data Fetching**: Call `GET /service-requests/:id`.
+- **Quotation Sub-System Action Panel**:
+  - **If no quotation OR latest quotation is `REJECTED` / `EXPIRED`**:
+    - Display **"Generate Quotation"** button.
+    - Opens modal with dynamic line items (add/remove rows: `description`, `quantity`, `unitPriceUsd`, `note`), `discountUsd`, `taxUsd`, `notes`, `terms`, and `expiresAt`.
+    - Submit calls `POST /service-requests/${requestId}/quotation`.
+  - **If active quotation exists (`SENT` or `DRAFT`)**:
+    - Display active quotation card with Version number, breakdown, and line items.
+    - Button: **"Edit Quotation"** $\rightarrow$ opens modal prepopulated with current line items $\rightarrow$ calls `PATCH /service-requests/${requestId}/quotation` (or `PATCH /quotations/${activeQuote.id}`).
+    - Button: **"Delete Quotation"** $\rightarrow$ calls `DELETE /service-requests/${requestId}/quotation`. Rolls request back to `UNDER_REVIEW`.
+    - **🔒 Immutability Rule**: Quotations can **only** be modified while pending customer action (`SENT`, `DRAFT`, `VIEWED`). Once the customer **`ACCEPTED`** or **`REJECTED`** the quotation, it becomes **permanently locked / immutable** and cannot be edited by anyone. If rejected, admin creates a new fresh quote instead.
+  - **If Customer Rejected**:
+    - Display the **Rejection Reason Box**: *"Customer feedback: {reason} - {comments}"*.
+    - Show button **"Create Revised Quotation"** so the admin can adjust line items and send a new quote with 1 click.
+
+---
+
+### 9.1 Fetch Quotation by Service Request
+
+- **Endpoint**: `GET /service-requests/:id/quotation` (also available as `GET /quotations/service-request/:serviceRequestId`)
+- **Access**: `CUSTOMER` (own requests), `ADMIN`
 - **Response `200 OK`**:
-
-```json
-{
-  "id": "quo-uuid-101",
-  "businessId": "QUO-2026-0045",
-  "status": "SENT",
-  "subtotalUsd": "220.00",
-  "discountUsd": "20.00",
-  "taxUsd": "16.00",
-  "totalUsd": "216.00",
-  "lineItems": [
-    {
-      "description": "Diagnostic & Heavy Duty Reverse Pipe Flush",
-      "quantity": 1,
-      "unitPriceUsd": "150.00",
-      "totalUsd": "150.00"
+  ```json
+  {
+    "success": true,
+    "serviceRequestId": "75c328db-0dbe-4fc4-8e10-9b439c276a6b",
+    "serviceRequestBusinessId": "REQ-2026-0089",
+    "activeQuotation": {
+      "id": "quo-uuid-101",
+      "businessId": "QUO-2026-0045",
+      "status": "SENT",
+      "version": 1,
+      "subtotalUsd": "220.00",
+      "discountUsd": "20.00",
+      "taxUsd": "16.00",
+      "totalUsd": "216.00",
+      "notes": "Estimated 2 hours on site",
+      "terms": "Payment due upon completion of on-site service.",
+      "expiresAt": "2026-09-30T00:00:00.000Z",
+      "lineItems": [
+        {
+          "id": "line-item-1",
+          "description": "Diagnostic & Heavy Duty Reverse Pipe Flush",
+          "quantity": 1,
+          "unitPriceUsd": "150.00",
+          "totalUsd": "150.00",
+          "note": "Complete flush of attic piping run"
+        },
+        {
+          "id": "line-item-2",
+          "description": "Replacement Low-Voltage Wall Inlet Valve (White)",
+          "quantity": 2,
+          "unitPriceUsd": "35.00",
+          "totalUsd": "70.00",
+          "note": null
+        }
+      ],
+      "rejectionHistory": []
     },
-    {
-      "description": "Replacement Low-Voltage Wall Inlet Valve (White)",
-      "quantity": 2,
-      "unitPriceUsd": "35.00",
-      "totalUsd": "70.00"
-    }
-  ]
-}
-```
+    "history": [ ... ]
+  }
+  ```
 
-### 9.4 Admin Create Itemized Quotation
+---
 
-- **Endpoint**: `POST /quotations`
+### 9.2 Admin Create Quotation for Service Request
+
+- **Endpoint**: `POST /service-requests/:id/quotation` (or `POST /quotations`)
 - **Access**: `ADMIN`
+- **Behavior**:
+  - Automatically verifies that no other active quote (`SENT`, `DRAFT`, `ACCEPTED`) exists for this request.
+  - Automatically updates any past-due quotes whose `expiresAt` has passed to `EXPIRED`.
+  - Sets quotation status to `SENT`, updates Service Request status to `QUOTED`, and automatically sends an email notification to the customer.
 - **Request Body**:
+  ```json
+  {
+    "lineItems": [
+      {
+        "description": "Motor diagnostic & replacement (Labor + Part)",
+        "quantity": 1,
+        "unitPriceUsd": 250.00,
+        "note": "OEM Beam 120V motor"
+      },
+      {
+        "description": "HEPA Filter Core Cartridge",
+        "quantity": 1,
+        "unitPriceUsd": 45.00
+      }
+    ],
+    "discountUsd": 15.00,
+    "taxUsd": 22.40,
+    "notes": "Includes 1-year parts warranty and 90-day labor guarantee.",
+    "terms": "Payment due upon completion of on-site service.",
+    "expiresAt": "2026-09-30"
+  }
+  ```
+- **Response `201 Created`**: Returns created quotation and dispatches customer notification.
+- **Error `400 Bad Request` (If active quote already exists)**:
+  ```json
+  {
+    "success": false,
+    "statusCode": 400,
+    "message": "An active quotation (QUO-2026-0045) with status 'SENT' already exists for this service request. Only one active quotation is allowed at a time. You can modify it, delete it, or wait until it is rejected or expired before creating a new one."
+  }
+  ```
 
-```json
-{
-  "serviceRequestId": "req-uuid-01",
-  "lineItems": [
-    {
-      "description": "Motor diagnostic & replacement",
-      "quantity": 1,
-      "unitPriceUsd": 250
-    },
-    { "description": "HEPA Filter Core", "quantity": 1, "unitPriceUsd": 45 }
-  ],
-  "discountUsd": 15,
-  "taxUsd": 22.4,
-  "notes": "Estimated 2 hours on site"
-}
-```
+---
 
-_(Automatically transitions service request to `QUOTED` and dispatches notification email to customer)_
-
-### 9.5 Admin Revise Quotation (Snapshot Capture)
+### 9.3 Admin Modify / Revise Quotation
 
 - **Endpoint**: `PATCH /quotations/:id`
 - **Access**: `ADMIN`
-- **Body**: Update line items, totals, or revision reason. Creates a new version and captures immutable revision snapshot into `QuotationRevision`.
+- **Request Body**:
+  ```json
+  {
+    "lineItems": [
+      { "description": "Motor diagnostic & replacement", "quantity": 1, "unitPriceUsd": 230.00 }
+    ],
+    "discountUsd": 20.00,
+    "notes": "Updated parts discount applied after phone call."
+  }
+  ```
+- **Behavior**: Updates the existing quotation, increments version number, and saves previous snapshot into `QuotationRevision`.
 
-### 9.6 Customer Accept Quotation (Auto-Provisions Service Order)
+---
 
-- **Endpoint**: `POST /quotations/:id/accept` (or `PATCH /quotations/:id/status` with `{"action": "ACCEPT"}`)
+### 9.4 Admin Delete Quotation
+
+- **Endpoint**: `DELETE /service-requests/:id/quotation` (or `DELETE /quotations/:id`)
+- **Access**: `ADMIN`
+- **Behavior**:
+  - Removes the quotation record along with itemized line items and revision history.
+  - If the service request was in `QUOTED` status, automatically rolls the service request status back to `UNDER_REVIEW`.
+  - Admin can now create a fresh quotation whenever ready.
+- **Response `200 OK`**:
+  ```json
+  {
+    "success": true,
+    "message": "Quotation QUO-2026-0045 has been deleted successfully."
+  }
+  ```
+
+---
+
+### 9.5 Customer Accept Quotation (Stripe Checkout Flow)
+
+- **Endpoint**: `POST /quotations/:id/accept` (or `PATCH /quotations/:id/status` with `{"action": "ACCEPTED"}`)
 - **Access**: `CUSTOMER`
 - **Concurrency**: Thread-safe with Redis lock (`quotation:action:${id}`).
+- **Behavior**:
+  - Marks quotation status as `ACCEPTED` and sets `acceptedAt`.
+  - Creates a **Stripe Checkout Session** with all quotation line items, tax, and customer metadata.
+  - Returns `checkoutUrl` and `sessionId` to the frontend.
+  - **Does NOT create the Service Order upfront** — the Service Order and its linked paid Invoice are generated automatically once payment succeeds.
 - **Response `200 OK`**:
-
-```json
-{
-  "success": true,
-  "message": "Quotation accepted and Service Order generated successfully",
-  "serviceOrder": {
-    "id": "so-uuid-777",
-    "businessId": "SO-2026-0045",
-    "status": "SCHEDULED",
-    "scheduledAt": "2026-09-16T14:00:00Z"
+  ```json
+  {
+    "success": true,
+    "message": "Quotation accepted successfully. Please complete payment to confirm your service order.",
+    "checkoutUrl": "https://checkout.stripe.com/c/pay/cs_test_..."
   }
-}
-```
+  ```
 
-### 9.7 Customer Reject Quotation
+#### 💳 Payment Completion & Provisioning (Stripe Webhook / Mock Pay)
 
-- **Endpoint**: `POST /quotations/:id/reject` (or `PATCH /quotations/:id/status` with `{"action": "REJECT", "rejectionReason": "..."}`)
+When payment completes on Stripe (`checkout.session.completed` event sent to `POST /store/orders/webhook/stripe`):
+1. **Service Order Provisioned**: Creates `ServiceOrder` (`SO-YYYYMMDD-XXXXX`) in `SCHEDULED` status linked to the quotation and service request.
+2. **Paid Invoice Generated**: Creates `Invoice` (`INV-YYYYMMDD-XXXXX`) with `serviceOrderId: serviceOrder.id`, `quotationId: quotation.id`, `status: "PAID"`, matching line items, and a linked `Payment` record with method `Stripe`.
+3. **Quotation Updated**: Links `quotation.serviceOrderId = serviceOrder.id`.
+4. **Real-Time Notification**: Admins and customer receive instant notifications.
+
+#### 🛠️ Helper Endpoints for Frontend:
+- **`GET /quotations/:id/checkout-session`**: Re-fetches or regenerates the Stripe Checkout Session for an accepted but unpaid quotation.
+- **`POST /quotations/:id/confirm-payment`**: Instantly simulates payment in development/mock mode without requiring active Stripe webhooks. Useful for local testing.
+
+---
+
+### 9.6 Customer Reject Quotation (Enables Admin to Create New One)
+
+- **Endpoint**: `POST /quotations/:id/reject` (or `PATCH /quotations/:id/status` with `{"action": "REJECTED", "reason": "..."}`)
 - **Access**: `CUSTOMER`
-- **Body**: `{"reason": "Price is higher than expected."}`
+- **Request Body**:
+  ```json
+  {
+    "reason": "Price exceeds budget",
+    "comments": "Would like an estimate with refurbished motor instead of brand new OEM."
+  }
+  ```
+- **Behavior**:
+  - Sets quotation status to `REJECTED`.
+  - Records rejection reason in `QuotationRejection` audit trail.
+  - Because this quotation is now `REJECTED`, the admin is **unblocked to create a new quotation** for the customer under the same service request!
+
+---
+
+### 9.7 List All Quotations (Unified 2-in-1 API)
+
+- **Endpoint**: `GET /quotations` (also available as `GET /quotations/me`)
+- **Access**: `CUSTOMER` / `ADMIN`
+- **Query Parameters**: `status`, `search`, `page`, `limit`
+- **Behavior**: Customers see received quotations; Admins see system-wide quotations.
 
 ---
 
 ## Phase 10: Service Orders & Technician Dispatch
 
-### 10.1 Admin List Service Orders with KPIs
+### 10.1 List Service Orders (Unified 2-in-1 API for Customer, Technician & Admin)
 
-- **Endpoint**: `GET /service-orders`
-- **Access**: `ADMIN`
+- **Endpoint**: `GET /service-orders` (also available as `GET /service-orders/me` for dedicated customer portal)
+- **Access**: `CUSTOMER` / `TECHNICIAN` / `ADMIN`
+- **Behavior**:
+  - **For Customers**: Returns their own service orders.
+  - **For Technicians**: Returns jobs assigned to them.
+  - **For Admins**: Returns all service orders with status filters and KPI counts.
 - **Query Parameters**: `status`, `search`, `page`, `limit`
-
-### 10.2 Customer List Own Service Orders
-
-- **Endpoint**: `GET /service-orders/me`
-- **Access**: `CUSTOMER`
 
 ### 10.3 Customer View Service Order Timeline & ETA
 
@@ -1027,11 +1534,25 @@ _(Automatically transitions service request to `QUOTED` and dispatches notificat
 
 - **Endpoint**: `POST /service-orders`
 - **Access**: `ADMIN`
+- **Request Body**:
+
+```json
+{
+  "serviceRequestId": "req-uuid-01",
+  "assignedTechnicianId": "tech-uuid-01",
+  "scheduledAt": "2026-09-16T14:00:00.000Z",
+  "estimatedDurationMin": 90,
+  "totalUsd": 250.00,
+  "summary": "Vacuum Motor Diagnostics and Line De-clogging",
+  "customerNotes": "Friendly dog in yard"
+}
+```
 
 ### 10.5 Admin Edit Service Order Details
 
 - **Endpoint**: `PATCH /service-orders/:id`
 - **Access**: `ADMIN`
+- **Request Body**: Partial fields of Create Service Order.
 
 ### 10.6 Technician / Admin Update Status
 
@@ -1058,7 +1579,7 @@ _(Status workflow: `SCHEDULED` $\rightarrow$ `TECHNICIAN_ASSIGNED` $\rightarrow$
 
 - **Endpoint**: `POST /service-orders/:id/eta`
 - **Access**: `TECHNICIAN`, `ADMIN`
-- **Body**: `{"minutes": 20, "note": "En route, slight highway delay"}`
+- **Body**: `{"minutes": 20}`
 
 ---
 
@@ -1072,7 +1593,7 @@ _(Status workflow: `SCHEDULED` $\rightarrow$ `TECHNICIAN_ASSIGNED` $\rightarrow$
 ```typescript
 import { io } from 'socket.io-client';
 
-const socket = io('http://localhost:5000/notifications', {
+const socket = io('http://localhost:3000/notifications', {
   query: {
     token: localStorage.getItem('access_token'),
   },
@@ -1135,6 +1656,25 @@ socket.on('notification:unread_count', (payload) => {
 
 - **Endpoint**: `POST /billing/invoices`
 - **Access**: `ADMIN`
+- **Request Body**:
+
+```json
+{
+  "customerId": "e47b1234-5678-4321-9876-abcdef012345",
+  "serviceOrderId": "so-uuid-777",
+  "lineItems": [
+    {
+      "description": "Central Vacuum Preventative Maintenance",
+      "quantity": 1,
+      "unitPriceUsd": 120.00
+    }
+  ],
+  "discountUsd": 10.00,
+  "taxUsd": 8.80,
+  "notes": "Annual maintenance inspection",
+  "dueDays": 14
+}
+```
 
 ### 12.6 Admin Edit Invoice Details
 
@@ -1145,13 +1685,29 @@ socket.on('notification:unread_count', (payload) => {
 
 - **Endpoint**: `POST /billing/invoices/:id/payments`
 - **Access**: `ADMIN`
-- **Body**: `{"amountUsd": 216.00, "method": "CASH", "reference": "Cash received on site"}`
+- **Request Body**:
+
+```json
+{
+  "amountUsd": 216.00,
+  "methodLabel": "Cash",
+  "transactionReference": "Cash received on site"
+}
+```
 
 ### 12.8 Admin Record Refund
 
 - **Endpoint**: `POST /billing/invoices/:id/refunds`
 - **Access**: `ADMIN`
-- **Body**: `{"paymentId": "pay-uuid-01", "amountUsd": 50.00, "reason": "Goodwill discount adjustment"}`
+- **Request Body**:
+
+```json
+{
+  "paymentId": "pay-uuid-01",
+  "amountUsd": 50.00,
+  "reason": "Goodwill discount adjustment"
+}
+```
 
 ### 12.9 Pay Invoice via Stripe (Online Card / Apple Pay)
 
@@ -1180,7 +1736,7 @@ socket.on('notification:unread_count', (payload) => {
   "ratingSummary": {
     "averageRating": 4.9,
     "totalReviews": 128,
-    "distribution": { "5": 115, "4": 10, "3": 2, "2": 1, "1": 0 }
+    "distribution": { "5": 115, "4": 10, "3": 2, "2": 1, "0": 0 }
   },
   "items": [
     {
@@ -1188,7 +1744,8 @@ socket.on('notification:unread_count', (payload) => {
       "authorName": "Jane D.",
       "rating": 5,
       "title": "Unbelievable suction power!",
-      "comment": "The installation was spotless and the pipe clog was cleared in under an hour.",
+      "body": "The installation was spotless and the pipe clog was cleared in under an hour.",
+      "type": "SERVICE",
       "serviceType": "Clog & Pipe Repair",
       "verifiedPurchase": true,
       "createdAt": "2026-08-31T10:00:00Z"
@@ -1197,39 +1754,173 @@ socket.on('notification:unread_count', (payload) => {
 }
 ```
 
-### 13.2 Customer List Submitted Reviews
+### 13.2 Customer List Own Reviewed Products (My Reviewed Products)
 
-- **Endpoint**: `GET /reviews/me`
-- **Access**: `CUSTOMER`
-
-### 13.3 Submit Review (for Service or Product Order)
-
-- **Endpoint**: `POST /reviews`
-- **Access**: `CUSTOMER`
-- **Request Body**:
+- **Endpoint**: `GET /reviews/me/products`
+- **Access**: `CUSTOMER` *(Requires Bearer JWT token)*
+- **Query Parameters**: `rating` *(optional: 1-5)*, `page` *(default: 1)*, `limit` *(default: 10)*
+- **Response `200 OK`**: Returns all products reviewed by the authenticated customer with review details, product metadata, images, and order references.
 
 ```json
 {
-  "serviceOrderId": "so-uuid-777",
-  "rating": 5,
-  "title": "Outstanding technician!",
-  "comment": "Dave arrived right on time and fixed all our second-floor suction issues."
+  "items": [
+    {
+      "review": {
+        "id": "2e1d7390-2c70-4f59-8669-9c59508d82ef",
+        "rating": 5,
+        "title": "Incredible Power & Whisper Quiet",
+        "body": "Installed this in our 3,500 sq ft home. Cleans pet hair effortlessly and the HEPA filtration keeps dust completely out of the air.",
+        "preview": "Installed this in our 3,500 sq ft home. Cleans pet hair effortlessly...",
+        "status": "PUBLISHED",
+        "submittedAt": "2026-08-25T14:30:00.000Z",
+        "publishedAt": "2026-08-25T14:30:00.000Z"
+      },
+      "product": {
+        "id": "43924fd1-10c0-43b9-a619-fa89a42530ec",
+        "name": "Elite Pro Power Unit 850AW",
+        "sku": "PROD-202608-A19",
+        "model": "EV-850",
+        "summary": "Quiet, commercial-grade 850 air-watt motor with hybrid HEPA filtration.",
+        "priceUsd": 899.99,
+        "status": "ACTIVE",
+        "availability": "IN_STOCK",
+        "isFeatured": true,
+        "images": [
+          {
+            "id": "img-01",
+            "key": "elite-vacuum/products/1725184800-a1b2c3d4",
+            "url": "https://res.cloudinary.com/dhl04adhz/image/upload/v1725184800/elite-vacuum/products/1725184800-a1b2c3d4.jpg",
+            "alt": "Front view of Elite Pro 850AW",
+            "isPrimary": true,
+            "sortOrder": 0
+          }
+        ]
+      },
+      "order": {
+        "id": "ord-uuid-001",
+        "businessId": "ORD-202608-0042",
+        "status": "DELIVERED",
+        "totalUsd": 924.50,
+        "placedAt": "2026-08-15T09:00:00.000Z"
+      }
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "limit": 10,
+    "total": 1,
+    "totalPages": 1,
+    "analytics": {
+      "averageRatingGiven": 5.0,
+      "totalReviewedProducts": 1
+    }
+  }
 }
 ```
 
-### 13.4 Admin List All Reviews with Moderation Controls
+### 13.3 Customer Get Own Review for a Specific Product (Check Review Status)
+
+- **Endpoint**: `GET /reviews/products/:productId/me` *(or `GET /products/:id/my-review`)*
+- **Access**: `CUSTOMER` *(Requires Bearer JWT token)*
+- **Parameters**: `productId` / `id` — accepts UUID, SKU (e.g. `PROD-202608-A19`), or Model (e.g. `EV-850`)
+- **Response `200 OK` (If Customer has reviewed the product)**:
+
+```json
+{
+  "hasReviewed": true,
+  "product": {
+    "id": "43924fd1-10c0-43b9-a619-fa89a42530ec",
+    "name": "Elite Pro Power Unit 850AW",
+    "sku": "PROD-202608-A19",
+    "model": "EV-850",
+    "priceUsd": 899.99,
+    "primaryImage": {
+      "id": "img-01",
+      "key": "elite-vacuum/products/1725184800-a1b2c3d4",
+      "url": "https://res.cloudinary.com/dhl04adhz/image/upload/v1725184800/elite-vacuum/products/1725184800-a1b2c3d4.jpg",
+      "alt": "Front view of Elite Pro 850AW",
+      "isPrimary": true
+    }
+  },
+  "review": {
+    "id": "2e1d7390-2c70-4f59-8669-9c59508d82ef",
+    "rating": 5,
+    "title": "Incredible Power & Whisper Quiet",
+    "body": "Installed this in our 3,500 sq ft home. Cleans pet hair effortlessly and the HEPA filtration keeps dust completely out of the air.",
+    "preview": "Installed this in our 3,500 sq ft home...",
+    "status": "PUBLISHED",
+    "submittedAt": "2026-08-25T14:30:00.000Z",
+    "publishedAt": "2026-08-25T14:30:00.000Z"
+  }
+}
+```
+
+- **Response `200 OK` (If Customer has NOT yet reviewed the product)**:
+
+```json
+{
+  "hasReviewed": false,
+  "product": {
+    "id": "43924fd1-10c0-43b9-a619-fa89a42530ec",
+    "name": "Elite Pro Power Unit 850AW",
+    "sku": "PROD-202608-A19",
+    "model": "EV-850",
+    "priceUsd": 899.99,
+    "primaryImage": { ... }
+  },
+  "review": null
+}
+```
+
+### 13.4 Customer List All Own Submitted Reviews (Products & Services)
+
+- **Endpoint**: `GET /reviews/me`
+- **Access**: `CUSTOMER`
+- **Query Parameters**: `type` (`PRODUCT` | `SERVICE`), `rating`, `productId`, `serviceId`, `page`, `limit`
+- **Response `200 OK`**: Returns paginated list of all reviews submitted by the customer with linked product/service relations.
+
+### 13.5 Submit Review (for Service or Product Order)
+
+- **Endpoint**: `POST /reviews`
+- **Access**: `CUSTOMER`
+- **Request Body (Product Review)**:
+
+```json
+{
+  "type": "PRODUCT",
+  "productId": "43924fd1-10c0-43b9-a619-fa89a42530ec",
+  "productOrderId": "ord-uuid-001",
+  "rating": 5,
+  "title": "Incredible Power & Whisper Quiet",
+  "body": "Installed this in our 3,500 sq ft home. Cleans pet hair effortlessly."
+}
+```
+
+- **Request Body (Service Review)**:
+
+```json
+{
+  "type": "SERVICE",
+  "serviceOrderId": "so-uuid-777",
+  "rating": 5,
+  "title": "Outstanding technician!",
+  "body": "Dave arrived right on time and fixed all our second-floor suction issues."
+}
+```
+
+### 13.6 Admin List All Reviews with Moderation Controls
 
 - **Endpoint**: `GET /reviews/admin/all`
 - **Access**: `ADMIN`
-- **Query Parameters**: `status` (`PENDING`, `PUBLISHED`, `REJECTED`, `HIDDEN`), `search`, `page`, `limit`
+- **Query Parameters**: `status` (`PENDING`, `PUBLISHED`, `REJECTED`, `HIDDEN`), `type`, `rating`, `search`, `page`, `limit`
 
-### 13.5 Admin Moderate Review
+### 13.7 Admin Moderate Review
 
 - **Endpoint**: `PATCH /reviews/:id/moderate`
 - **Access**: `ADMIN`
 - **Body**: `{"status": "PUBLISHED"}`
 
-### 13.6 Admin Delete Review
+### 13.8 Admin Delete Review
 
 - **Endpoint**: `DELETE /reviews/:id`
 - **Access**: `ADMIN`
@@ -2019,11 +2710,11 @@ Admin dispatchers have full CRUD control over the field technician workforce.
 
 ```json
 {
+  "displayName": "Alex Rivera",
   "email": "technician@elitevacuum.com",
-  "password": "TemporaryPassword123!",
-  "firstName": "Alex",
-  "lastName": "Rivera",
   "phone": "+1 555-0188",
+  "password": "TemporaryPassword123!",
+  "status": "ACTIVE",
   "specializations": ["Central Vacuum Installation", "Pipe Unclogging"],
   "bio": "Certified central vac installer with 8+ years experience."
 }

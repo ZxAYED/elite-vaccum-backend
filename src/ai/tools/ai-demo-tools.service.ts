@@ -36,7 +36,6 @@ export class AiDemoToolsService {
           name: s.name,
           category: s.category,
           description: s.description,
-          basePriceUsd: s.basePriceUsd ? Number(s.basePriceUsd) : 100,
           active: true,
         }));
       }
@@ -71,7 +70,6 @@ export class AiDemoToolsService {
           name: liveService.name,
           category: liveService.category,
           description: liveService.description,
-          basePriceUsd: liveService.basePriceUsd ? Number(liveService.basePriceUsd) : 100,
           active: liveService.status === 'ACTIVE',
         };
       }

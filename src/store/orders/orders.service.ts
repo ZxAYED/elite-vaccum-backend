@@ -26,6 +26,7 @@ import { CreateOrderDto, OrderPaymentMethod } from '../dto/create-order.dto';
 import { OrderListQueryDto } from '../dto/order-list-query.dto';
 import { UpdateOrderStatusDto } from '../dto/update-order-status.dto';
 import { StoreProductsService } from '../products/products.service';
+import { QuotationsService } from 'src/quotations/quotations.service';
 
 @Injectable()
 export class StoreOrdersService {
@@ -37,6 +38,7 @@ export class StoreOrdersService {
     private readonly productsService: StoreProductsService,
     private readonly redis: RedisService,
     private readonly notificationsService: NotificationsService,
+    private readonly quotationsService: QuotationsService,
   ) {
     const stripeKey = process.env.STRIPE_SECRET_KEY;
     if (stripeKey && stripeKey.trim().length > 0 && !stripeKey.includes('...')) {
@@ -704,14 +706,28 @@ export class StoreOrdersService {
 
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object as Stripe.Checkout.Session;
-      const orderId = session.metadata?.orderId || session.client_reference_id;
+      const quotationId = session.metadata?.quotationId;
+      const isQuotation = session.metadata?.type === 'QUOTATION' || !!quotationId;
 
-      if (orderId) {
-        await this.markOrderAsPaid(
-          orderId,
+      if (isQuotation && quotationId) {
+        this.logger.log(
+          `Stripe Webhook: checkout.session.completed for Quotation '${quotationId}'`,
+        );
+        await this.quotationsService.fulfillQuotationPayment(
+          quotationId,
           session.id,
           (session.amount_total ?? 0) / 100,
+          session.customer_email || session.customer_details?.email || undefined,
         );
+      } else {
+        const orderId = session.metadata?.orderId || session.client_reference_id;
+        if (orderId) {
+          await this.markOrderAsPaid(
+            orderId,
+            session.id,
+            (session.amount_total ?? 0) / 100,
+          );
+        }
       }
     }
 

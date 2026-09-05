@@ -60,12 +60,12 @@ export class ProductListQueryDto {
   readonly categorySlug?: string;
 
   @ApiPropertyOptional({
-    enum: ProductStatus,
-    description: 'Filter by Product status (Admin only: DRAFT, ACTIVE, ARCHIVED)',
+    example: 'ACTIVE',
+    description: 'Filter by product status: "ACTIVE", "DRAFT", "ARCHIVED", or "ALL" (Unified for Customer & Admin)',
   })
   @IsOptional()
-  @IsEnum(ProductStatus)
-  readonly status?: ProductStatus;
+  @IsString()
+  readonly status?: string;
 
   @ApiPropertyOptional({
     example: 'in_stock',
@@ -107,6 +107,21 @@ export class ProductListQueryDto {
   @IsOptional()
   @IsString()
   readonly sort?: string;
+
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Filter by featured products only',
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true || value === 1 || value === '1')
+      return true;
+    if (value === 'false' || value === false || value === 0 || value === '0')
+      return false;
+    return undefined;
+  })
+  @IsBoolean()
+  readonly isFeatured?: boolean;
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()

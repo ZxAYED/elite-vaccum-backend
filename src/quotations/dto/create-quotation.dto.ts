@@ -37,12 +37,7 @@ export class QuotationLineItemInputDto {
   readonly note?: string;
 }
 
-export class CreateQuotationDto {
-  @ApiProperty({ example: 'e47b1234-5678-4321-9876-abcdef012345', description: 'Target Service Request UUID' })
-  @IsUUID()
-  @IsNotEmpty()
-  readonly serviceRequestId!: string;
-
+export class CreateQuotationForServiceDto {
   @ApiProperty({
     type: [QuotationLineItemInputDto],
     description: 'Itemized quotation line items (labor, parts, materials)',
@@ -80,4 +75,11 @@ export class CreateQuotationDto {
   @IsOptional()
   @IsString()
   readonly terms?: string;
+}
+
+export class CreateQuotationDto extends CreateQuotationForServiceDto {
+  @ApiPropertyOptional({ example: 'e47b1234-5678-4321-9876-abcdef012345', description: 'Target Service Request UUID' })
+  @IsOptional()
+  @IsUUID()
+  readonly serviceRequestId?: string;
 }
