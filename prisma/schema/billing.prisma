@@ -34,6 +34,9 @@ model Invoice {
   @@index([customerId, status])
   @@index([status, dueDate])
   @@index([serviceRequestId])
+  @@index([productOrderId])
+  @@index([serviceOrderId])
+  @@index([quotationId])
   @@map("invoices")
 }
 
@@ -88,5 +91,6 @@ model Refund {
   invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
 
   @@index([paymentId])
+  @@index([invoiceId])
   @@map("refunds")
 }

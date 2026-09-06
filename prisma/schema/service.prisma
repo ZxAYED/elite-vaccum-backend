@@ -81,6 +81,8 @@ model ServiceRequest {
 
   @@index([customerId, status])
   @@index([status, submittedAt])
+  @@index([assignedTechnicianId, status])
+  @@index([serviceId])
   @@map("service_requests")
 }
 

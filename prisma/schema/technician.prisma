@@ -44,6 +44,7 @@ model TechnicianEta {
   technician   Technician   @relation(fields: [technicianId], references: [id], onDelete: Cascade)
 
   @@index([serviceOrderId])
+  @@index([technicianId])
   @@map("technician_etas")
 }
 
@@ -65,6 +66,7 @@ model TechnicianServiceReport {
   partsUsed    TechnicianReportPart[]
   evidence     TechnicianReportEvidence[]
 
+  @@index([technicianId])
   @@map("technician_service_reports")
 }
 

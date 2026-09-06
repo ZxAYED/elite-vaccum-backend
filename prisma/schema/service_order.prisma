@@ -34,6 +34,7 @@ model ServiceOrder {
 
   @@index([customerId, status])
   @@index([assignedTechnicianId, scheduledAt])
+  @@index([quotationId])
   @@map("service_orders")
 }
 
@@ -71,5 +72,7 @@ model Appointment {
   technician     Technician?     @relation(fields: [technicianId], references: [id], onDelete: SetNull)
 
   @@index([technicianId, startAt])
+  @@index([serviceRequestId])
+  @@index([serviceOrderId])
   @@map("appointments")
 }

@@ -22,6 +22,7 @@ import { ProductListQueryDto } from '../dto/product-list-query.dto';
 import { UpdateProductDto } from '../dto/update-product.dto';
 import { UpdateProductStatusDto } from '../dto/update-product-status.dto';
 import { UpdateProductStockDto } from '../dto/update-product-stock.dto';
+import { UploadProductImagesDto } from '../dto/upload-product-images.dto';
 
 @Injectable()
 export class StoreProductsService {
@@ -69,16 +70,20 @@ export class StoreProductsService {
     } satisfies Prisma.ProductInclude;
   }
 
-  private calculateStockAvailability(
+  private resolveSynchronizedAvailability(
     quantity: number,
-    currentAvailability?: ProductAvailability,
+    requestedAvailability?: ProductAvailability,
   ): ProductAvailability {
+    // Preserve intentional business states
     if (
-      currentAvailability === ProductAvailability.BACKORDER ||
-      currentAvailability === ProductAvailability.DISCONTINUED
+      requestedAvailability === ProductAvailability.BACKORDER ||
+      requestedAvailability === ProductAvailability.PREORDER ||
+      requestedAvailability === ProductAvailability.DISCONTINUED
     ) {
-      return currentAvailability;
+      return requestedAvailability;
     }
+
+    // Strictly synchronize with physical numerical stock
     if (quantity <= 0) {
       return ProductAvailability.OUT_OF_STOCK;
     }
@@ -192,9 +197,10 @@ export class StoreProductsService {
     }
 
     const initialQuantity = dto.quantity ?? 1;
-    const initialAvailability =
-      dto.availability ||
-      this.calculateStockAvailability(initialQuantity);
+    const initialAvailability = this.resolveSynchronizedAvailability(
+      initialQuantity,
+      dto.availability,
+    );
 
     // 5. Atomic Creation in Prisma Transaction
     const product = await this.prisma.$transaction(async (tx) => {
@@ -607,16 +613,16 @@ export class StoreProductsService {
       }
     }
 
-    // Calculate smart availability if quantity changed and availability was not explicitly supplied
+    // Calculate smart availability: strictly enforce synchronization whenever quantity or availability is supplied
     const updatedQuantity = dto.quantity ?? existing.quantity;
+    const requestedAvailability = dto.availability ?? existing.availability;
     const updatedAvailability =
-      dto.availability ??
-      (dto.quantity !== undefined
-        ? this.calculateStockAvailability(
+      dto.quantity !== undefined || dto.availability !== undefined
+        ? this.resolveSynchronizedAvailability(
             updatedQuantity,
-            existing.availability,
+            requestedAvailability,
           )
-        : undefined);
+        : undefined;
 
     return this.prisma.$transaction(async (tx) => {
       // Delete images from database
@@ -732,6 +738,102 @@ export class StoreProductsService {
       await this.invalidateProductCache(updatedProduct.id, updatedProduct.sku);
       return updatedProduct;
     });
+  }
+
+  async uploadProductImages(
+    productId: string,
+    files: Array<Express.Multer.File>,
+    dto?: UploadProductImagesDto,
+    _user?: RequestUser | null,
+  ) {
+    if (!files || files.length === 0) {
+      throw new BadRequestException('At least one image file is required');
+    }
+
+    const isUuid = this.isUuid(productId);
+    const product = await this.prisma.product.findFirst({
+      where: isUuid ? { id: productId } : { sku: productId },
+      include: {
+        images: {
+          orderBy: { sortOrder: 'asc' },
+        },
+      },
+    });
+
+    if (!product) {
+      throw new NotFoundException(`Product '${productId}' not found`);
+    }
+
+    const currentHighestSort = product.images.reduce(
+      (max, img) => Math.max(max, img.sortOrder),
+      0,
+    );
+    const hasPrimary = product.images.some((img) => img.isPrimary);
+    const shouldSetPrimary = dto?.isPrimary === true || !hasPrimary;
+
+    const uploadedRecords: Array<{
+      productId: string;
+      key: string;
+      url: string;
+      alt: string;
+      isPrimary: boolean;
+      sortOrder: number;
+    }> = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const uploaded = await this.cloudinaryService.uploadFile({
+        fileBuffer: file.buffer,
+        originalName: file.originalname,
+        mimeType: file.mimetype,
+        folder: 'products',
+      });
+
+      uploadedRecords.push({
+        productId: product.id,
+        key: uploaded.key,
+        url: uploaded.url,
+        alt:
+          dto?.alt?.trim() ||
+          product.imageAlt ||
+          `${product.name} image ${product.images.length + i + 1}`,
+        isPrimary: shouldSetPrimary && i === 0,
+        sortOrder: currentHighestSort + 1 + i,
+      });
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      if (shouldSetPrimary && hasPrimary) {
+        await tx.productImage.updateMany({
+          where: { productId: product.id, isPrimary: true },
+          data: { isPrimary: false },
+        });
+      }
+
+      await tx.productImage.createMany({
+        data: uploadedRecords,
+      });
+
+      const updatedImages = await tx.productImage.findMany({
+        where: { productId: product.id },
+        orderBy: [{ isPrimary: 'desc' }, { sortOrder: 'asc' }],
+      });
+
+      return updatedImages;
+    });
+
+    await this.invalidateProductCache(product.id, product.sku);
+
+    const newlyCreated = result.filter((img) =>
+      uploadedRecords.some((rec) => rec.key === img.key),
+    );
+
+    return {
+      success: true,
+      message: `Successfully uploaded ${newlyCreated.length} image(s)`,
+      images: newlyCreated,
+      allImages: result,
+    };
   }
 
   async deleteProductImages(
@@ -874,8 +976,10 @@ export class StoreProductsService {
       throw new NotFoundException('Product not found');
     }
 
-    const availability =
-      dto.availability ?? this.calculateStockAvailability(dto.quantity);
+    const availability = this.resolveSynchronizedAvailability(
+      dto.quantity,
+      dto.availability ?? product.availability,
+    );
 
     const updated = await this.prisma.product.update({
       where: { id },
@@ -930,7 +1034,7 @@ export class StoreProductsService {
     });
 
     if (updated) {
-      const newAvailability = this.calculateStockAvailability(
+      const newAvailability = this.resolveSynchronizedAvailability(
         updated.quantity,
         updated.availability,
       );
@@ -967,7 +1071,7 @@ export class StoreProductsService {
     }
 
     const newQuantity = product.quantity + quantity;
-    const newAvailability = this.calculateStockAvailability(
+    const newAvailability = this.resolveSynchronizedAvailability(
       newQuantity,
       product.availability,
     );

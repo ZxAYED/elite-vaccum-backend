@@ -30,6 +30,8 @@ model CustomerReview {
 
   @@index([type, status])
   @@index([customerId])
+  @@index([productId, status])
+  @@index([serviceId, status])
   @@map("customer_reviews")
 }
 

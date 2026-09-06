@@ -48,7 +48,8 @@ model Product {
   orderItems     ProductOrderItem[]
   reviews        CustomerReview[]
 
-  @@index([categoryId, status, sku, availability])
+  @@index([categoryId, status])
+  @@index([status, availability])
   @@map("products")
 }
 
@@ -165,6 +166,7 @@ model ProductOrder {
 
   @@index([customerId, status])
   @@index([placedAt])
+  @@index([shippingAddressId])
   @@map("product_orders")
 }
 
@@ -184,6 +186,7 @@ model ProductOrderItem {
   product Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   @@index([orderId])
+  @@index([productId])
   @@map("product_order_items")
 }
 

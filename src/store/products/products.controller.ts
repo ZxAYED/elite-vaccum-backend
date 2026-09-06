@@ -38,6 +38,7 @@ import { ProductListQueryDto } from '../dto/product-list-query.dto';
 import { UpdateProductDto } from '../dto/update-product.dto';
 import { UpdateProductStatusDto } from '../dto/update-product-status.dto';
 import { UpdateProductStockDto } from '../dto/update-product-stock.dto';
+import { UploadProductImagesDto } from '../dto/upload-product-images.dto';
 import { ReviewsService } from 'src/reviews/reviews.service';
 import { StoreProductsService } from './products.service';
 
@@ -100,13 +101,14 @@ export class StoreProductsController {
           description: 'JSON string of CreateProductDto',
           example: JSON.stringify(
             {
-              name: 'Elite Pro Central Vacuum Unit',
-              slug: 'elite-pro-central-vacuum-unit',
-              description: 'Heavy duty central vacuum system',
-              price: 899.99,
-              stock: 25,
               categoryId: '2e6d4ef0-71e5-4e1c-8fcb-2cfd4a8c8ed6',
-              brand: 'Elite Central Vacuum',
+              name: 'Elite Pro Central Vacuum Unit',
+              model: 'S900-PRO',
+              summary: 'Heavy duty central vacuum system',
+              description: 'Heavy duty central vacuum system with dual stage motor and advanced filtration',
+              priceUsd: 899.99,
+              quantity: 25,
+              taxable: true,
               isFeatured: true,
             },
             null,
@@ -202,6 +204,38 @@ export class StoreProductsController {
     summary:
       'Unified Update Product: edit fields, upload new images to Cloudinary, or delete existing images via deleteImageIds (Admin only)',
   })
+  @ApiBody({
+    description: 'Update Product payload with optional image modifications',
+    schema: {
+      type: 'object',
+      properties: {
+        data: {
+          type: 'string',
+          description: 'JSON string of UpdateProductDto',
+          example: JSON.stringify(
+            {
+              name: 'Updated Elite Pro Central Vacuum Unit',
+              priceUsd: 949.99,
+              quantity: 20,
+              taxable: true,
+              isFeatured: true,
+              deleteImageIds: [],
+            },
+            null,
+            2,
+          ),
+        },
+        images: {
+          type: 'array',
+          items: {
+            type: 'string',
+            format: 'binary',
+          },
+          description: 'Additional direct image files to upload to Cloudinary',
+        },
+      },
+    },
+  })
   @ApiResponse({ status: 200, description: 'Product successfully updated' })
   @ApiResponse({ status: 404, description: 'Product not found' })
   async updateProduct(
@@ -262,6 +296,55 @@ export class StoreProductsController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.productsService.updateProductStock(id, dto, user);
+  }
+
+  @Post(':id/images')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.CREATED)
+  @UseInterceptors(FilesInterceptor('images', 10, productImageMulterOptions))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary:
+      'Upload one or more images for a specific product directly to Cloudinary (Admin only)',
+  })
+  @ApiBody({
+    description: 'Upload product images with optional alt text and primary flag',
+    schema: {
+      type: 'object',
+      properties: {
+        images: {
+          type: 'array',
+          items: {
+            type: 'string',
+            format: 'binary',
+          },
+          description:
+            'Image files (JPG, PNG, WEBP, GIF, max 10MB each, up to 10 files)',
+        },
+        alt: {
+          type: 'string',
+          description: 'Optional custom alt text for uploaded images',
+          example: 'Side profile view',
+        },
+        isPrimary: {
+          type: 'boolean',
+          description: 'Set the first uploaded image as primary product image',
+          example: false,
+        },
+      },
+      required: ['images'],
+    },
+  })
+  @ApiResponse({ status: 201, description: 'Images uploaded successfully' })
+  @ApiResponse({ status: 400, description: 'No image files provided or invalid file format' })
+  @ApiResponse({ status: 404, description: 'Product not found' })
+  uploadProductImages(
+    @Param('id') id: string,
+    @UploadedFiles() files: Array<Express.Multer.File>,
+    @Body() dto: UploadProductImagesDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.productsService.uploadProductImages(id, files, dto, user);
   }
 
   @Delete(':id/images')

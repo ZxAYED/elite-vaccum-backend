@@ -57,7 +57,7 @@ model PasswordReset {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([token, expiresAt])
+  @@index([userId])
   @@map("password_resets")
 }
 

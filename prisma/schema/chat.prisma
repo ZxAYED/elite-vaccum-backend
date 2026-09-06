@@ -81,5 +81,6 @@ model ChatMessageAttachment {
 
   message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
+  @@index([messageId])
   @@map("chat_message_attachments")
 }

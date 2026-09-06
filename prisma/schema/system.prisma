@@ -31,6 +31,7 @@ model FileUpload {
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@index([purpose])
+  @@index([uploaderId])
   @@map("file_uploads")
 }
 
