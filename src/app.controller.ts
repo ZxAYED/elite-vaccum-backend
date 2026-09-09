@@ -13,7 +13,11 @@ export class AppController {
   getHello(): string {
     return this.appService.getHello();
   }
-
+ @Public()
+  @Get('health')
+  health() {
+    return this.appService.getApiInfo();
+  }
   @Get('me')
   @ApiBearerAuth()
   me(@Req() req: { user?: unknown }) {
