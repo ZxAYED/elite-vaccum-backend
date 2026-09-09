@@ -1,7 +1,29 @@
+# Local development stack: Postgres + Redis + the API.
+# Replaces the old split between compose.yaml and docker-compose.yml.
+name: aryegrunzwieg
+
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: aryegrunzwieg-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-aryegrunzwieg}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   redis:
     image: redis:7-alpine
-    container_name: marcus-redis
+    container_name: aryegrunzwieg-redis
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     ports:
@@ -18,22 +40,28 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: arafat2025/marcus-app:latest
-    platform: linux/amd64
-    container_name: marcus-app
+      target: runtime
+    image: zxayed/aryegrunzwieg-backend:latest
+    container_name: aryegrunzwieg-app
     restart: unless-stopped
     env_file:
       - .env
     environment:
+      NODE_ENV: production
+      PORT: "3000"
+      # Container-network hostnames override whatever .env points at.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-aryegrunzwieg}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      RUN_MIGRATIONS: "true"
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     ports:
       - "3000:3000"
-    # Auto-run migrations on startup
-    command: sh -c "npx prisma migrate deploy && node dist/main.js"
 
 volumes:
+  postgres_data:
   redis_data:
