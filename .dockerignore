@@ -1,14 +1,40 @@
+# ── build output & deps (rebuilt inside the image) ──
 node_modules
-npm-debug.log
 dist
-.git
-.gitignore
+coverage
+*.tsbuildinfo
+
+# ── secrets: never bake these into a layer ──
 .env
 .env.*
-.dockerignore
+!.env.example
+
+# ── vcs / editor / ci ──
+.git
+.gitignore
+.github
+.vscode
+.idea
 .gemini
-Dockerfile.zip
-coverage
+.claude
+
+# ── docker itself ──
+Dockerfile*
+compose.yaml
+docker-compose*.yml
+.dockerignore
+
+# ── tests, scripts & docs not needed at runtime ──
+test
+scripts
+docs
+*.md
+!README.md
+
+# ── noise ──
 *.log
+npm-debug.log*
 repomix-output.xml
-scripts/
+Dockerfile.zip
+uploads
+tmp
