@@ -1,31 +1,26 @@
-// ==========================================
-// 10. REVIEWS & MODERATION
-// ==========================================
-
 model CustomerReview {
-  id             String       @id @default(uuid()) @db.Uuid
-  type           ReviewType
-  status         ReviewStatus @default(PENDING)
-  customerId     String       @map("customer_id") @db.Uuid
-  customerName   String       @map("customer_name") @db.VarChar(150)
-  productOrderId String?      @map("product_order_id") @db.Uuid
-  serviceOrderId String?      @map("service_order_id") @db.Uuid
-  productId      String?      @map("product_id") @db.Uuid
-  serviceId      String?      @map("service_id") @db.Uuid
-  rating         Int // 1 to 5
-  title          String       @db.VarChar(200)
-  body           String       @db.Text
-  preview        String?      @db.VarChar(255)
-  submittedAt    DateTime     @default(now()) @map("submitted_at") @db.Timestamptz
-  publishedAt    DateTime?    @map("published_at") @db.Timestamptz
-  hiddenAt       DateTime?    @map("hidden_at") @db.Timestamptz
-  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz
-
-  customer          Customer                  @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  productOrder      ProductOrder?             @relation(fields: [productOrderId], references: [id], onDelete: SetNull)
-  serviceOrder      ServiceOrder?             @relation(fields: [serviceOrderId], references: [id], onDelete: SetNull)
-  product           Product?                  @relation(fields: [productId], references: [id], onDelete: SetNull)
-  service           Service?                  @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  id                String                    @id @default(uuid()) @db.Uuid
+  type              ReviewType
+  status            ReviewStatus              @default(PENDING)
+  customerId        String                    @map("customer_id") @db.Uuid
+  customerName      String                    @map("customer_name") @db.VarChar(150)
+  productOrderId    String?                   @map("product_order_id") @db.Uuid
+  serviceOrderId    String?                   @map("service_order_id") @db.Uuid
+  productId         String?                   @map("product_id") @db.Uuid
+  serviceId         String?                   @map("service_id") @db.Uuid
+  rating            Int
+  title             String                    @db.VarChar(200)
+  body              String
+  preview           String?                   @db.VarChar(255)
+  submittedAt       DateTime                  @default(now()) @map("submitted_at") @db.Timestamptz(6)
+  publishedAt       DateTime?                 @map("published_at") @db.Timestamptz(6)
+  hiddenAt          DateTime?                 @map("hidden_at") @db.Timestamptz(6)
+  updatedAt         DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  customer          Customer                  @relation(fields: [customerId], references: [id])
+  product           Product?                  @relation(fields: [productId], references: [id])
+  productOrder      ProductOrder?             @relation(fields: [productOrderId], references: [id])
+  service           Service?                  @relation(fields: [serviceId], references: [id])
+  serviceOrder      ServiceOrder?             @relation(fields: [serviceOrderId], references: [id])
   moderationHistory ReviewModerationHistory[]
 
   @@index([type, status])
@@ -40,12 +35,11 @@ model ReviewModerationHistory {
   reviewId   String                 @map("review_id") @db.Uuid
   action     ReviewModerationAction
   reason     String?                @db.VarChar(255)
-  note       String?                @db.Text
+  note       String?
   actorLabel String                 @map("actor_label") @db.VarChar(100)
   actorId    String?                @map("actor_id") @db.Uuid
-  createdAt  DateTime               @default(now()) @map("created_at") @db.Timestamptz
-
-  review CustomerReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  createdAt  DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  review     CustomerReview         @relation(fields: [reviewId], references: [id], onDelete: Cascade)
 
   @@index([reviewId])
   @@map("review_moderation_history")

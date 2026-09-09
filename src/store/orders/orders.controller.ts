@@ -45,7 +45,13 @@ export class StoreOrdersController {
   })
   @ApiResponse({
     status: 201,
-    description: 'Order created and Stripe checkout session URL or COD confirmation returned',
+    description:
+      'Order created and Stripe checkout session URL or COD confirmation returned',
+  })
+  @ApiResponse({
+    status: 503,
+    description:
+      'Stripe could not open a checkout session. The order is rolled back to FAILED and inventory is restored.',
   })
   createOrder(
     @Body() dto: CreateOrderDto,
@@ -76,7 +82,7 @@ export class StoreOrdersController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Stripe Webhook handler for checkout.session.completed & payment confirmation',
+      'Stripe Webhook handler: confirms payment (checkout.session.completed / async_payment_succeeded) and fails the order on checkout.session.expired, async_payment_failed, or payment_intent.payment_failed - restoring inventory and voiding the invoice',
   })
   handleStripeWebhook(
     @Req() req: any,

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -50,6 +51,57 @@ export class BillingService {
 
   private isAdmin(user?: RequestUser | null) {
     return user?.role === UserRole.ADMIN;
+  }
+
+  private isUuid(id: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      id,
+    );
+  }
+
+  /**
+   * Resolves an invoice UUID from either form of id. Every endpoint documents
+   * "UUID or INV-XXXXX", but querying the uuid column with a business id makes
+   * Postgres raise a cast error (500) instead of a clean 404.
+   */
+  private async resolveInvoiceId(idOrBusinessId: string): Promise<string> {
+    const found = await this.prisma.invoice.findFirst({
+      where: this.isUuid(idOrBusinessId)
+        ? { id: idOrBusinessId }
+        : { businessId: idOrBusinessId },
+      select: { id: true },
+    });
+
+    if (!found) throw new NotFoundException('Invoice not found');
+    return found.id;
+  }
+
+  /**
+   * A store product order is paid through its own Stripe Checkout session
+   * (POST /store/orders -> checkoutUrl). Billing must not expose a second,
+   * independent payment rail against the same invoice: the customer would be
+   * able to pay for one order twice, on two Stripe objects the other rail
+   * knows nothing about.
+   */
+  private assertNotStoreOrderInvoice(invoice: {
+    productOrderId: string | null;
+    businessId: string;
+  }) {
+    if (invoice.productOrderId) {
+      throw new BadRequestException(
+        `Invoice '${invoice.businessId}' belongs to a store order and is paid through the store checkout, not through billing. Use GET /store/orders/checkout/session/:orderId to get its payment link.`,
+      );
+    }
+  }
+
+  /** Escapes text interpolated into the printable HTML invoice. */
+  private escapeHtml(value: unknown): string {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   private async generateInvoiceBusinessId(): Promise<string> {
@@ -253,13 +305,19 @@ export class BillingService {
     });
 
     if (!customer) {
-      return { items: [], meta: { page: 1, limit: 10, total: 0, totalPages: 0 } };
+      // Same meta shape as the populated path, so clients never branch on it.
+      const { meta } = getPagination(query.page, query.limit, 0);
+      return { items: [], meta };
     }
 
+    // DRAFT invoices are pro-forma (an unpaid card order, an admin draft) and
+    // must stay hidden. Spreading query.status after the notIn used to
+    // OVERWRITE it, letting ?status=DRAFT expose them.
     const where: Prisma.InvoiceWhereInput = {
       customerId: customer.id,
-      status: { notIn: [InvoiceStatus.DRAFT] },
-      ...(query.status ? { status: query.status } : {}),
+      ...(query.status && query.status !== InvoiceStatus.DRAFT
+        ? { status: query.status }
+        : { status: { notIn: [InvoiceStatus.DRAFT] } }),
     };
 
     const totalItems = await this.prisma.invoice.count({ where });
@@ -278,9 +336,7 @@ export class BillingService {
 
   async findOne(id: string, user?: RequestUser | null) {
     const invoice = await this.prisma.invoice.findFirst({
-      where: {
-        OR: [{ id }, { businessId: id }],
-      },
+      where: this.isUuid(id) ? { id } : { businessId: id },
       include: this.invoiceInclude(),
     });
 
@@ -301,7 +357,9 @@ export class BillingService {
   // UPDATE INVOICE
 
 
-  async update(id: string, dto: UpdateInvoiceDto, user: RequestUser) {
+  async update(idOrBusinessId: string, dto: UpdateInvoiceDto, user: RequestUser) {
+    const id = await this.resolveInvoiceId(idOrBusinessId);
+
     const existing = await this.prisma.invoice.findUnique({
       where: { id },
       include: { lineItems: true },
@@ -365,7 +423,12 @@ export class BillingService {
   // PAYMENTS & REFUNDS
 
 
-  async recordPayment(id: string, dto: RecordPaymentDto, user: RequestUser) {
+  async recordPayment(
+    idOrBusinessId: string,
+    dto: RecordPaymentDto,
+    user: RequestUser,
+  ) {
+    const id = await this.resolveInvoiceId(idOrBusinessId);
     const lockKey = `billing:invoice:${id}`;
     const lockToken = await this.redis.acquireLock(lockKey, {
       ttlMs: 15000,
@@ -387,6 +450,61 @@ export class BillingService {
 
       if (!invoice) throw new NotFoundException('Invoice not found');
 
+      if (invoice.status === InvoiceStatus.VOID) {
+        throw new BadRequestException(
+          `Invoice '${invoice.businessId}' is VOID and cannot accept payments.`,
+        );
+      }
+
+      // A store order already has a live Stripe Checkout rail. Recording a
+      // second CARD payment here would double-charge; offline settlement
+      // (cash / check for a COD order) stays legitimate.
+      if (invoice.productOrderId) {
+        const method = dto.methodLabel.trim().toLowerCase();
+        if (method.includes('stripe') || method.includes('card')) {
+          throw new BadRequestException(
+            `Invoice '${invoice.businessId}' belongs to a store order. Card payments must go through the store checkout, not billing. Record only offline settlement (Cash, Check) here.`,
+          );
+        }
+      }
+
+      const reference = dto.transactionReference?.trim() || null;
+
+      // transactionReference is unique; a replayed webhook or double-clicked
+      // form would otherwise blow up with a raw constraint violation.
+      if (reference) {
+        const duplicate = await this.prisma.payment.findUnique({
+          where: { transactionReference: reference },
+          select: { id: true, invoiceId: true },
+        });
+        if (duplicate) {
+          throw new ConflictException(
+            `A payment with reference '${reference}' has already been recorded.`,
+          );
+        }
+      }
+
+      const existingPaid = invoice.payments
+        .filter((p) => p.status === PaymentStatus.SUCCEEDED)
+        .reduce((sum, p) => sum + Number(p.amountUsd), 0);
+
+      const existingRefunded = invoice.refunds
+        .filter((r) => r.status === 'COMPLETED')
+        .reduce((sum, r) => sum + Number(r.amountUsd), 0);
+
+      const outstanding = Math.max(
+        0,
+        Number(invoice.totalUsd) - Math.max(0, existingPaid - existingRefunded),
+      );
+
+      // Tolerance of half a cent absorbs float noise without allowing a real
+      // overpayment through.
+      if (dto.amountUsd > outstanding + 0.005) {
+        throw new BadRequestException(
+          `Payment of $${dto.amountUsd.toFixed(2)} exceeds the outstanding balance of $${outstanding.toFixed(2)} on invoice '${invoice.businessId}'.`,
+        );
+      }
+
       return await this.prisma.$transaction(async (tx) => {
         const payment = await tx.payment.create({
           data: {
@@ -394,19 +512,10 @@ export class BillingService {
             customerId: invoice.customerId,
             amountUsd: new Prisma.Decimal(dto.amountUsd),
             methodLabel: dto.methodLabel.trim(),
-            transactionReference: dto.transactionReference?.trim() || null,
+            transactionReference: reference,
             status: dto.status || PaymentStatus.SUCCEEDED,
           },
         });
-
-        // Calculate net paid across all payments minus refunds
-        const existingPaid = invoice.payments
-          .filter((p) => p.status === PaymentStatus.SUCCEEDED)
-          .reduce((sum, p) => sum + Number(p.amountUsd), 0);
-
-        const existingRefunded = invoice.refunds
-          .filter((r) => r.status === 'COMPLETED')
-          .reduce((sum, r) => sum + Number(r.amountUsd), 0);
 
         const totalPaid = existingPaid + dto.amountUsd;
         const netPaid = Math.max(0, totalPaid - existingRefunded);
@@ -455,11 +564,17 @@ export class BillingService {
     }
   }
 
-  async recordRefund(id: string, dto: RecordRefundDto, user: RequestUser) {
+  async recordRefund(
+    idOrBusinessId: string,
+    dto: RecordRefundDto,
+    user: RequestUser,
+  ) {
+    const id = await this.resolveInvoiceId(idOrBusinessId);
     const lockKey = `billing:invoice:${id}`;
     const lockToken = await this.redis.acquireLock(lockKey, {
-      ttlMs: 15000,
-      retryCount: 0,
+      ttlMs: 30000,
+      retryCount: 1,
+      retryDelayMs: 500,
     });
 
     if (!lockToken) {
@@ -484,14 +599,60 @@ export class BillingService {
         throw new NotFoundException('Payment record not found for this invoice');
       }
 
+      if (
+        payment.status !== PaymentStatus.SUCCEEDED &&
+        payment.status !== PaymentStatus.PARTIALLY_REFUNDED
+      ) {
+        throw new BadRequestException(
+          `Payment is '${payment.status}'. Only a settled payment can be refunded.`,
+        );
+      }
+
+      // Never refund more than this payment actually took.
+      const alreadyRefunded = invoice.refunds
+        .filter((r) => r.paymentId === dto.paymentId && r.status === 'COMPLETED')
+        .reduce((sum, r) => sum + Number(r.amountUsd), 0);
+
+      const refundable = Number(payment.amountUsd) - alreadyRefunded;
+
+      if (dto.amountUsd > refundable + 0.005) {
+        throw new BadRequestException(
+          `Refund of $${dto.amountUsd.toFixed(2)} exceeds the $${refundable.toFixed(2)} still refundable on this payment.`,
+        );
+      }
+
+      // Move the money before writing the ledger. An external call inside the
+      // transaction would hold row locks for the whole round trip, and a
+      // rollback cannot claw a Stripe refund back anyway.
+      const stripeRefund = await this.issueStripeRefund(
+        payment.transactionReference,
+        dto.amountUsd,
+        invoice.businessId,
+        dto.reason,
+      );
+
+      const refundedAfter = alreadyRefunded + dto.amountUsd;
+
       return await this.prisma.$transaction(async (tx) => {
         const refund = await tx.refund.create({
           data: {
             invoiceId: id,
             paymentId: dto.paymentId,
             amountUsd: new Prisma.Decimal(dto.amountUsd),
-            status: 'COMPLETED',
+            status: stripeRefund ? 'COMPLETED' : 'MANUAL_REQUIRED',
             reason: dto.reason.trim(),
+            transactionReference: stripeRefund?.id || null,
+          },
+        });
+
+        // Reverse the payment itself so the ledger does not still read SUCCEEDED
+        await tx.payment.update({
+          where: { id: dto.paymentId },
+          data: {
+            status:
+              refundedAfter >= Number(payment.amountUsd) - 0.005
+                ? PaymentStatus.REFUNDED
+                : PaymentStatus.PARTIALLY_REFUNDED,
           },
         });
 
@@ -527,8 +688,12 @@ export class BillingService {
 
         return {
           success: true,
-          message: `Refund of $${dto.amountUsd.toFixed(2)} processed. Invoice status updated to ${newStatus}.`,
+          message: stripeRefund
+            ? `Refund of $${dto.amountUsd.toFixed(2)} issued to the customer's card. Invoice status updated to ${newStatus}.`
+            : `Refund of $${dto.amountUsd.toFixed(2)} recorded. Invoice status updated to ${newStatus}. The money must be returned to the customer offline.`,
           refund,
+          stripeRefundId: stripeRefund?.id || null,
+          requiresManualPayout: !stripeRefund,
           invoice: updatedInvoice,
         };
       });
@@ -537,14 +702,68 @@ export class BillingService {
     }
   }
 
+  /**
+   * Issues a Stripe refund when the payment settled through Stripe.
+   *
+   * Refunds are created against a PaymentIntent (pi_...) or Charge (ch_...).
+   * Returns null for cash, check, or any other offline payment so the caller
+   * records a manual refund instead of failing the whole operation.
+   */
+  private async issueStripeRefund(
+    transactionReference: string | null,
+    amountUsd: number,
+    invoiceBusinessId: string,
+    reason: string,
+  ): Promise<{ id: string; status: string } | null> {
+    const reference = transactionReference?.trim();
+
+    if (
+      !reference ||
+      !(reference.startsWith('pi_') || reference.startsWith('ch_'))
+    ) {
+      this.logger.warn(
+        `Invoice '${invoiceBusinessId}' payment reference '${reference || 'none'}' is not a Stripe charge. The refund must be returned offline.`,
+      );
+      return null;
+    }
+
+    if (!this.stripe) {
+      throw new BadRequestException(
+        'Stripe is not configured on this server, so the card refund cannot be issued.',
+      );
+    }
+
+    const refund = await this.stripe.refunds.create(
+      {
+        ...(reference.startsWith('pi_')
+          ? { payment_intent: reference }
+          : { charge: reference }),
+        amount: Math.round(amountUsd * 100),
+        reason: 'requested_by_customer',
+        metadata: { invoiceBusinessId, note: reason.slice(0, 400) },
+      },
+      {
+        idempotencyKey: `refund:invoice:${invoiceBusinessId}:${Math.round(amountUsd * 100)}`,
+      },
+    );
+
+    this.logger.log(
+      `Stripe refund '${refund.id}' (${refund.status}) issued for invoice '${invoiceBusinessId}'.`,
+    );
+
+    return { id: refund.id, status: refund.status || 'unknown' };
+  }
+
   async generateHtmlInvoice(id: string, user?: RequestUser | null) {
     const invoice = await this.findOne(id, user);
+
+    const esc = (v: unknown) => this.escapeHtml(v);
 
     const lineItemsHtml = invoice.lineItems
       .map(
         (item) => `
         <tr>
-          <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.description}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #eee;">${esc(item.description)}</td>
           <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
           <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">$${Number(item.unitPriceUsd).toFixed(2)}</td>
           <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">$${Number(item.totalUsd).toFixed(2)}</td>
@@ -557,7 +776,7 @@ export class BillingService {
       <html>
       <head>
         <meta charset="utf-8"/>
-        <title>Invoice ${invoice.businessId}</title>
+        <title>Invoice ${esc(invoice.businessId)}</title>
         <style>
           body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #333; padding: 40px; }
           .header { display: flex; justify-content: space-between; border-bottom: 2px solid #004488; padding-bottom: 20px; }
@@ -580,8 +799,8 @@ export class BillingService {
           </div>
           <div style="text-align: right;">
             <h2>INVOICE</h2>
-            <div><strong>Invoice #:</strong> ${invoice.businessId}</div>
-            <div><strong>Status:</strong> ${invoice.status}</div>
+            <div><strong>Invoice #:</strong> ${esc(invoice.businessId)}</div>
+            <div><strong>Status:</strong> ${esc(invoice.status)}</div>
             <div><strong>Issue Date:</strong> ${new Date(invoice.issueDate).toLocaleDateString()}</div>
             <div><strong>Due Date:</strong> ${new Date(invoice.dueDate).toLocaleDateString()}</div>
           </div>
@@ -589,9 +808,9 @@ export class BillingService {
 
         <div style="margin-top: 30px;">
           <strong>Billed To:</strong><br/>
-          ${invoice.customer.displayName}<br/>
-          ${invoice.customer.email}<br/>
-          ${invoice.customer.phone || ''}
+          ${esc(invoice.customer.displayName)}<br/>
+          ${esc(invoice.customer.email)}<br/>
+          ${esc(invoice.customer.phone || '')}
         </div>
 
         <table class="items-table">
@@ -640,8 +859,22 @@ export class BillingService {
   async createStripePaymentIntent(id: string, user: RequestUser) {
     const invoice = await this.findOne(id, user);
 
+    // Store orders are paid through their own Checkout session. Opening a
+    // PaymentIntent here would be a second way to pay the same order.
+    this.assertNotStoreOrderInvoice(invoice);
+
     if (invoice.status === InvoiceStatus.PAID) {
       throw new BadRequestException('Invoice is already fully paid');
+    }
+
+    if (invoice.status === InvoiceStatus.VOID) {
+      throw new BadRequestException('Invoice is VOID and cannot be paid');
+    }
+
+    if (invoice.status === InvoiceStatus.DRAFT) {
+      throw new BadRequestException(
+        'Invoice is still a draft and has not been issued for payment yet.',
+      );
     }
 
     const existingPaid = invoice.payments
@@ -711,10 +944,31 @@ export class BillingService {
     paymentIntentId: string,
     user: RequestUser,
   ) {
+    if (!paymentIntentId?.trim()) {
+      throw new BadRequestException('paymentIntentId is required');
+    }
+
     const invoice = await this.findOne(id, user);
 
+    this.assertNotStoreOrderInvoice(invoice);
+
+    // Idempotent: a retried confirm (double click, refreshed return page) must
+    // report the existing payment rather than recording a second one or
+    // blowing up on the unique transactionReference constraint.
+    const already = invoice.payments.find(
+      (p) => p.transactionReference === paymentIntentId.trim(),
+    );
+    if (already) {
+      return {
+        success: true,
+        message: 'Payment was already recorded for this PaymentIntent.',
+        payment: already,
+        invoice,
+      };
+    }
+
     let amountPaid = Number(invoice.totalUsd);
-    let transactionReference = paymentIntentId;
+    let transactionReference = paymentIntentId.trim();
 
     if (this.stripe) {
       if (paymentIntentId.startsWith('pi_mock_')) {
@@ -723,12 +977,24 @@ export class BillingService {
         );
       }
 
-      const intent = await this.stripe.paymentIntents.retrieve(paymentIntentId);
+      const intent = await this.stripe.paymentIntents.retrieve(
+        transactionReference,
+      );
       if (intent.status !== 'succeeded') {
         throw new BadRequestException(
           `Stripe PaymentIntent is in '${intent.status}' state, not succeeded`,
         );
       }
+
+      // The intent must be the one created for THIS invoice. Without this a
+      // caller could settle a $500 invoice by quoting the PaymentIntent of a
+      // $5 one they genuinely paid.
+      if (intent.metadata?.invoiceId !== invoice.id) {
+        throw new BadRequestException(
+          'This PaymentIntent was not created for this invoice.',
+        );
+      }
+
       amountPaid = intent.amount_received / 100;
       transactionReference = intent.id;
     } else {

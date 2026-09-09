@@ -4,6 +4,7 @@ import {
   ExceptionFilter,
   HttpException,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import { Prisma } from '@prisma/client';
@@ -49,6 +50,8 @@ function mapPrismaKnownError(error: Prisma.PrismaClientKnownRequestError) {
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
+  private readonly logger = new Logger(AllExceptionsFilter.name);
+
   constructor(private readonly httpAdapterHost: HttpAdapterHost) {}
 
   catch(exception: unknown, host: ArgumentsHost) {
@@ -107,6 +110,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     if (exception instanceof Prisma.PrismaClientValidationError) {
+      this.logger.error(`PrismaClientValidationError: ${exception.message}`);
       httpAdapter.reply(
         ctx.getResponse(),
         {
@@ -116,6 +120,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
           timestamp,
           path,
           message: 'Database validation error',
+          details: exception.message,
         },
         HttpStatus.BAD_REQUEST,
       );

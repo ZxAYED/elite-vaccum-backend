@@ -13,6 +13,11 @@ import { RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AddCartItemDto } from '../dto/add-cart-item.dto';
 import { UpdateCartItemDto } from '../dto/update-cart-item.dto';
+import {
+  SHIPPING_NOTE,
+  calculateShippingFee,
+  calculateTax,
+} from '../store-pricing';
 
 @Injectable()
 export class StoreCartService {
@@ -79,11 +84,18 @@ export class StoreCartService {
   private async refreshCartSubtotal(cartId: string): Promise<Prisma.Decimal> {
     const items = await this.prisma.cartItem.findMany({
       where: { cartId },
-      select: { quantity: true, unitPriceUsd: true },
+      select: {
+        quantity: true,
+        unitPriceUsd: true,
+        product: { select: { priceUsd: true } },
+      },
     });
 
+    // Price from the live catalogue so the stored subtotal matches what
+    // checkout will actually charge.
     const subtotal = items.reduce((sum, item) => {
-      return sum.plus(item.unitPriceUsd.mul(item.quantity));
+      const unitPrice = item.product?.priceUsd ?? item.unitPriceUsd;
+      return sum.plus(unitPrice.mul(item.quantity));
     }, new Prisma.Decimal(0));
 
     await this.prisma.cart.update({
@@ -106,14 +118,23 @@ export class StoreCartService {
         prod.category?.status === 'ACTIVE' &&
         prod.quantity >= item.quantity;
 
+      // Checkout prices the order from the LIVE catalogue price, so the cart
+      // must display that same price. Showing the snapshot taken at add-to-cart
+      // time would quote one total and charge another after a price change.
+      const unitPrice = Number(prod?.priceUsd ?? item.unitPriceUsd);
+      const snapshotPrice = Number(item.unitPriceUsd);
+
       return {
         id: item.id,
         productId: item.productId,
         productName: prod?.name || 'Unknown Product',
         productSku: prod?.sku || null,
-        unitPriceUsd: Number(item.unitPriceUsd).toFixed(2),
+        unitPriceUsd: unitPrice.toFixed(2),
+        priceChangedSinceAdded: unitPrice !== snapshotPrice,
+        previousUnitPriceUsd:
+          unitPrice !== snapshotPrice ? snapshotPrice.toFixed(2) : null,
         quantity: item.quantity,
-        totalUsd: (Number(item.unitPriceUsd) * item.quantity).toFixed(2),
+        totalUsd: (unitPrice * item.quantity).toFixed(2),
         image: prod?.images?.[0]?.url || null,
         availableStock: prod?.quantity ?? 0,
         isAvailable,
@@ -128,14 +149,13 @@ export class StoreCartService {
       0,
     );
 
-    // Free shipping threshold: $150 or more qualifies for free freight, else $18 standard shipping
-    const shippingFee = subtotal >= 150 ? 0.0 : subtotal > 0 ? 18.0 : 0.0;
+    // Flat freight fee, charged once per order however many items it holds.
+    const shippingFee = calculateShippingFee(items.length);
 
-    // 8% tax calculation on taxable items
     const taxableSubtotal = items
       .filter((i: any) => i.taxable)
       .reduce((acc: number, i: any) => acc + Number(i.unitPriceUsd) * i.quantity, 0);
-    const estimatedTax = Number((taxableSubtotal * 0.08).toFixed(2));
+    const estimatedTax = calculateTax(taxableSubtotal);
 
     const estimatedTotal = Number((subtotal + shippingFee + estimatedTax).toFixed(2));
 
@@ -147,10 +167,7 @@ export class StoreCartService {
         itemCount,
         subtotalUsd: subtotal.toFixed(2),
         shippingFeeUsd: shippingFee.toFixed(2),
-        freeShippingThreshold: '150.00',
-        qualifiesForFreeShipping: subtotal >= 150,
-        amountNeededForFreeShipping:
-          subtotal < 150 && subtotal > 0 ? (150 - subtotal).toFixed(2) : '0.00',
+        shippingNote: SHIPPING_NOTE,
         estimatedTaxUsd: estimatedTax.toFixed(2),
         estimatedTotalUsd: estimatedTotal.toFixed(2),
       },

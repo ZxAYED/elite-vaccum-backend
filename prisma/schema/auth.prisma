@@ -1,31 +1,26 @@
-// ==========================================
-// 2. AUTH, IDENTITY & ACCESS CONTROL
-// ==========================================
-
 model User {
-  id              String    @id @default(uuid()) @db.Uuid
-  email           String    @unique @db.VarChar(255)
-  passwordHash    String?   @map("password_hash") @db.VarChar(255)
-  firstName       String    @map("first_name") @db.VarChar(100)
-  lastName        String    @map("last_name") @db.VarChar(100)
-  phone           String?   @db.VarChar(30)
-  role            UserRole  @default(CUSTOMER)
-  isActive        Boolean   @default(true) @map("is_active")
-  emailVerifiedAt DateTime? @map("email_verified_at") @db.Timestamptz
-  lastLoginAt     DateTime? @map("last_login_at") @db.Timestamptz
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
-
+  id                     String                  @id @default(uuid()) @db.Uuid
+  email                  String                  @unique @db.VarChar(255)
+  passwordHash           String?                 @map("password_hash") @db.VarChar(255)
+  firstName              String                  @map("first_name") @db.VarChar(100)
+  lastName               String                  @map("last_name") @db.VarChar(100)
+  phone                  String?                 @db.VarChar(30)
+  role                   UserRole                @default(CUSTOMER)
+  isActive               Boolean                 @default(true) @map("is_active")
+  emailVerifiedAt        DateTime?               @map("email_verified_at") @db.Timestamptz(6)
+  lastLoginAt            DateTime?               @map("last_login_at") @db.Timestamptz(6)
+  createdAt              DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+  auditLogs              AuditLog[]
+  chatMessages           ChatMessage[]
+  chatParticipants       ChatParticipant[]
+  internalNotesAuthored  CustomerInternalNote[]  @relation("NoteAuthor")
   customer               Customer?
+  notificationPreference NotificationPreference?
+  notifications          Notification[]
+  passwordResets         PasswordReset[]
   technician             Technician?
   sessions               UserSession[]
-  passwordResets         PasswordReset[]
-  notifications          Notification[]
-  notificationPreference NotificationPreference?
-  auditLogs              AuditLog[]
-  internalNotesAuthored  CustomerInternalNote[]  @relation("NoteAuthor")
-  chatParticipants       ChatParticipant[]
-  chatMessages           ChatMessage[]
 
   @@index([role, isActive])
   @@map("users")
@@ -37,11 +32,10 @@ model UserSession {
   refreshToken String    @unique @map("refresh_token") @db.VarChar(500)
   userAgent    String?   @map("user_agent") @db.VarChar(500)
   ipAddress    String?   @map("ip_address") @db.VarChar(45)
-  expiresAt    DateTime  @map("expires_at") @db.Timestamptz
-  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(6)
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, expiresAt])
   @@map("user_sessions")
@@ -51,11 +45,10 @@ model PasswordReset {
   id        String    @id @default(uuid()) @db.Uuid
   userId    String    @map("user_id") @db.Uuid
   token     String    @unique @db.VarChar(255)
-  expiresAt DateTime  @map("expires_at") @db.Timestamptz
-  usedAt    DateTime? @map("used_at") @db.Timestamptz
-  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@map("password_resets")
@@ -66,13 +59,13 @@ model OtpCode {
   email       String     @db.VarChar(255)
   purpose     OtpPurpose
   codeHash    String     @map("code_hash") @db.VarChar(255)
-  expiresAt   DateTime   @map("expires_at") @db.Timestamptz
+  expiresAt   DateTime   @map("expires_at") @db.Timestamptz(6)
   attempts    Int        @default(0)
   maxAttempts Int        @default(5) @map("max_attempts")
   isConsumed  Boolean    @default(false) @map("is_consumed")
-  consumedAt  DateTime?  @map("consumed_at") @db.Timestamptz
-  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+  consumedAt  DateTime?  @map("consumed_at") @db.Timestamptz(6)
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([email, purpose])
   @@index([expiresAt])

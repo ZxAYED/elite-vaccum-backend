@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsIn, IsOptional, IsString } from 'class-validator';
 
 export class ReportsQueryDto {
   @ApiPropertyOptional({ example: '30d', description: 'Quick timeframe filter: 7d, 30d, 90d, 1y, all' })
@@ -16,4 +16,13 @@ export class ReportsQueryDto {
   @IsOptional()
   @IsDateString()
   readonly to?: string;
+
+  @ApiPropertyOptional({
+    example: 'ALL',
+    enum: ['ALL', 'PRODUCT', 'SERVICE'],
+    description: 'Restrict revenue figures to store orders, service work, or both',
+  })
+  @IsOptional()
+  @IsIn(['ALL', 'PRODUCT', 'SERVICE'])
+  readonly orderType?: 'ALL' | 'PRODUCT' | 'SERVICE' = 'ALL';
 }

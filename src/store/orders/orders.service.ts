@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import {
@@ -26,6 +27,7 @@ import { CreateOrderDto, OrderPaymentMethod } from '../dto/create-order.dto';
 import { OrderListQueryDto } from '../dto/order-list-query.dto';
 import { UpdateOrderStatusDto } from '../dto/update-order-status.dto';
 import { StoreProductsService } from '../products/products.service';
+import { calculateShippingFee, calculateTax } from '../store-pricing';
 import { QuotationsService } from 'src/quotations/quotations.service';
 
 @Injectable()
@@ -146,8 +148,11 @@ export class StoreOrdersService {
       },
       invoices: {
         include: {
-          payments: true,
+          lineItems: { orderBy: { sortOrder: 'asc' } },
+          payments: { orderBy: { processedAt: 'desc' } },
+          refunds: { orderBy: { processedAt: 'desc' } },
         },
+        orderBy: { createdAt: 'desc' },
       },
     } satisfies Prisma.ProductOrderInclude;
   }
@@ -242,11 +247,11 @@ export class StoreOrdersService {
             data: {
               customerId,
               label: inline.label?.trim() || 'Delivery Address',
-              line1: inline.line1.trim(),
+              line1: inline.line1?.trim() || '',
               line2: inline.line2?.trim() || null,
-              city: inline.city.trim(),
-              state: inline.state.trim(),
-              postalCode: inline.postalCode.trim(),
+              city: inline.city?.trim() || '',
+              state: inline.state?.trim() || '',
+              postalCode: inline.postalCode?.trim() || '',
               country: inline.country?.trim() || 'USA',
               isDefault,
             },
@@ -318,16 +323,17 @@ export class StoreOrdersService {
       }, new Prisma.Decimal(0));
 
       const subtotalNumber = Number(subtotal);
-      // Free shipping threshold >= $150, otherwise standard freight $18.00
-      const shippingFee = subtotalNumber >= 150 ? 0.0 : 18.0;
+      // Flat freight fee, charged once per order however many products or units
+      // it contains. Priced through the shared helper so the cart preview and
+      // this charge can never diverge.
+      const shippingFee = calculateShippingFee(cart.items.length);
 
-      // 8% estimated tax on taxable items
       const taxableSubtotal = cart.items
         .filter((i: any) => i.product.taxable)
         .reduce((sum: number, i: any) => {
           return sum + Number(i.product.priceUsd) * i.quantity;
         }, 0);
-      const tax = Number((taxableSubtotal * 0.08).toFixed(2));
+      const tax = calculateTax(taxableSubtotal);
       const discount = 0.0;
       const total = Number((subtotalNumber + shippingFee + tax - discount).toFixed(2));
 
@@ -391,6 +397,7 @@ export class StoreOrdersService {
               },
             },
           },
+          include: { items: true, customer: true },
         });
 
         // Create Invoice for Order
@@ -399,7 +406,14 @@ export class StoreOrdersService {
             businessId: invoiceBusinessId,
             customerId,
             productOrderId: createdOrder.id,
-            status: InvoiceStatus.ISSUED,
+            // A card order is not billed until Stripe confirms payment, so its
+            // invoice stays a DRAFT pro-forma and never shows up as an
+            // outstanding, separately-payable bill. A COD order IS a real bill
+            // the moment it is placed - the courier collects on delivery.
+            status: isCod ? InvoiceStatus.ISSUED : InvoiceStatus.DRAFT,
+            notes: isCod
+              ? 'Payment method: Cash on Delivery (COD). Payable to the courier on delivery.'
+              : 'Payment method: Online card payment via Stripe Checkout.',
             dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
             subtotalUsd: subtotal,
             taxUsd: new Prisma.Decimal(tax),
@@ -408,7 +422,6 @@ export class StoreOrdersService {
             lineItems: {
               create: [
                 ...cart.items.map((item: any, idx: number) => ({
-                  itemType: 'PRODUCT',
                   description: `${item.product.name} (SKU: ${item.product.sku || 'N/A'})`,
                   quantity: item.quantity,
                   unitPriceUsd: item.product.priceUsd,
@@ -418,7 +431,6 @@ export class StoreOrdersService {
                 ...(shippingFee > 0
                   ? [
                       {
-                        itemType: 'FEE',
                         description: 'Standard Freight Shipping',
                         quantity: 1,
                         unitPriceUsd: new Prisma.Decimal(shippingFee),
@@ -432,19 +444,20 @@ export class StoreOrdersService {
           },
         });
 
-        // If Cash on Delivery, record pending COD payment
-        if (isCod) {
-          await tx.payment.create({
-            data: {
-              invoiceId: createdInvoice.id,
-              customerId,
-              amountUsd: new Prisma.Decimal(total),
-              status: PaymentStatus.PENDING,
-              methodLabel: 'Cash on Delivery',
-              transactionReference: `COD-${businessId}`,
-            },
-          });
-        }
+        // Record the pending payment for BOTH methods so every order carries a
+        // queryable payment status from the moment it is placed.
+        await tx.payment.create({
+          data: {
+            invoiceId: createdInvoice.id,
+            customerId,
+            amountUsd: new Prisma.Decimal(total),
+            status: PaymentStatus.PENDING,
+            methodLabel: isCod ? 'Cash on Delivery' : 'Stripe Credit Card',
+            transactionReference: isCod
+              ? `COD-${businessId}`
+              : `STRIPE-PENDING-${businessId}`,
+          },
+        });
 
         // Clear Customer Cart
         await tx.cartItem.deleteMany({
@@ -506,19 +519,36 @@ export class StoreOrdersService {
           success: true,
           message: 'Order placed successfully with Cash on Delivery (COD)',
           paymentMethod: 'COD',
+          paymentStatus: PaymentStatus.PENDING,
           order,
           checkoutUrl: null,
           sessionId: null,
         };
       }
 
-      // Stripe Checkout Session for Online Card Payment
-      const stripeSession = await this.createStripeCheckoutSession(order, user);
+      // Stripe Checkout Session for Online Card Payment.
+      // If Stripe refuses the session the order can never be paid, so unwind the
+      // placement (inventory released, invoice voided) before surfacing the error.
+      let stripeSession: { id: string; url: string };
+      try {
+        stripeSession = await this.createStripeCheckoutSession(order, user);
+      } catch (err: any) {
+        await this.markOrderAsFailed(
+          order.id,
+          `Stripe checkout session could not be created (${err.message})`,
+        ).catch((rollbackErr: any) => {
+          this.logger.error(
+            `Failed to unwind order '${order.businessId}' after Stripe error: ${rollbackErr.message}`,
+          );
+        });
+        throw err;
+      }
 
       return {
         success: true,
         message: 'Order created successfully',
         paymentMethod: 'STRIPE',
+        paymentStatus: PaymentStatus.PENDING,
         order,
         checkoutUrl: stripeSession.url,
         sessionId: stripeSession.id,
@@ -536,19 +566,32 @@ export class StoreOrdersService {
     user?: RequestUser | null,
   ): Promise<{ id: string; url: string }> {
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    const successUrl = (
+    const configuredSuccess =
       process.env.STRIPE_SUCCESS_URL ||
-      `${frontendUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}&order_id=${order.id}`
-    )
-      .replace('{ORDER_ID}', order.id)
-      .replace('{BUSINESS_ID}', order.businessId);
+      `${frontendUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}&order_id=${order.id}`;
 
-    const cancelUrl = (
+    const successUrl = configuredSuccess
+      .replace('{ORDER_ID}', order.id)
+      .replace('${order.id}', order.id)
+      .replace('{BUSINESS_ID}', order.businessId)
+      .replace('${order.businessId}', order.businessId);
+
+    const configuredCancel =
       process.env.STRIPE_CANCEL_URL ||
-      `${frontendUrl}/checkout/cancel?order_id=${order.id}`
-    ).replace('{ORDER_ID}', order.id);
+      `${frontendUrl}/checkout?cancelled=true`;
+
+    const cancelUrl = configuredCancel
+      .replace('{ORDER_ID}', order.id)
+      .replace('${order.id}', order.id)
+      .replace('{BUSINESS_ID}', order.businessId)
+      .replace('${order.businessId}', order.businessId);
 
     if (!this.stripe) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new ServiceUnavailableException(
+          'Online card payment is temporarily unavailable. Stripe is not configured on this server.',
+        );
+      }
       return {
         id: `mock_cs_${order.id.slice(0, 8)}`,
         url: `${frontendUrl}/checkout/mock-pay?order_id=${order.id}&total=${Number(order.totalUsd)}`,
@@ -607,6 +650,13 @@ export class StoreOrdersService {
           businessId: order.businessId,
           customerId: order.customerId,
         },
+        payment_intent_data: {
+          metadata: {
+            orderId: order.id,
+            businessId: order.businessId,
+            customerId: order.customerId,
+          },
+        },
         success_url: successUrl,
         cancel_url: cancelUrl,
       });
@@ -616,11 +666,13 @@ export class StoreOrdersService {
         url: session.url || successUrl,
       };
     } catch (err: any) {
-      this.logger.error(`Failed to create Stripe checkout session: ${err.message}`, err.stack);
-      return {
-        id: `fallback_${order.id}`,
-        url: `${frontendUrl}/checkout/success?order_id=${order.id}`,
-      };
+      this.logger.error(
+        `Failed to create Stripe checkout session for order '${order.businessId}': ${err.message}`,
+        err.stack,
+      );
+      throw new ServiceUnavailableException(
+        'Unable to start the payment session with Stripe. Please try again.',
+      );
     }
   }
 
@@ -704,31 +756,106 @@ export class StoreOrdersService {
       }
     }
 
-    if (event.type === 'checkout.session.completed') {
-      const session = event.data.object as Stripe.Checkout.Session;
-      const quotationId = session.metadata?.quotationId;
-      const isQuotation = session.metadata?.type === 'QUOTATION' || !!quotationId;
+    switch (event.type) {
+      // Payment succeeded
+      case 'checkout.session.completed':
+      case 'checkout.session.async_payment_succeeded': {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const quotationId = session.metadata?.quotationId;
+        const isQuotation =
+          session.metadata?.type === 'QUOTATION' || !!quotationId;
 
-      if (isQuotation && quotationId) {
-        this.logger.log(
-          `Stripe Webhook: checkout.session.completed for Quotation '${quotationId}'`,
-        );
-        await this.quotationsService.fulfillQuotationPayment(
-          quotationId,
-          session.id,
-          (session.amount_total ?? 0) / 100,
-          session.customer_email || session.customer_details?.email || undefined,
-        );
-      } else {
-        const orderId = session.metadata?.orderId || session.client_reference_id;
-        if (orderId) {
-          await this.markOrderAsPaid(
-            orderId,
+        if (isQuotation && quotationId) {
+          this.logger.log(
+            `Stripe Webhook: ${event.type} for Quotation '${quotationId}'`,
+          );
+          await this.quotationsService.fulfillQuotationPayment(
+            quotationId,
             session.id,
             (session.amount_total ?? 0) / 100,
+            session.customer_email ||
+              session.customer_details?.email ||
+              undefined,
           );
+        } else {
+          const orderId =
+            session.metadata?.orderId || session.client_reference_id;
+          if (orderId) {
+            // Refunds are issued against the PaymentIntent, never the Checkout
+            // Session, so the PaymentIntent id is what must be persisted.
+            const paymentIntentId =
+              typeof session.payment_intent === 'string'
+                ? session.payment_intent
+                : session.payment_intent?.id;
+
+            await this.markOrderAsPaid(
+              orderId,
+              paymentIntentId || session.id,
+              (session.amount_total ?? 0) / 100,
+            );
+          }
         }
+        break;
       }
+
+      // Customer abandoned Checkout, or the session timed out (Stripe expires
+      // sessions after 24h). The order can never be paid from this session.
+      case 'checkout.session.expired':
+      // A delayed payment method (e.g. bank debit) was ultimately declined.
+      case 'checkout.session.async_payment_failed': {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const orderId =
+          session.metadata?.orderId || session.client_reference_id;
+        const isQuotation =
+          session.metadata?.type === 'QUOTATION' ||
+          !!session.metadata?.quotationId;
+
+        if (isQuotation) {
+          this.logger.warn(
+            `Stripe Webhook: ${event.type} for Quotation '${session.metadata?.quotationId}'. Quotation remains awaiting payment.`,
+          );
+          break;
+        }
+
+        if (!orderId) {
+          this.logger.warn(
+            `Stripe Webhook: ${event.type} received without an orderId; ignored.`,
+          );
+          break;
+        }
+
+        await this.markOrderAsFailed(
+          orderId,
+          event.type === 'checkout.session.expired'
+            ? 'Checkout session expired before payment was completed'
+            : 'Asynchronous payment was declined by the bank',
+          session.id,
+        );
+        break;
+      }
+
+      // Card declined, authentication failed, or insufficient funds.
+      case 'payment_intent.payment_failed': {
+        const intent = event.data.object as Stripe.PaymentIntent;
+        const orderId = intent.metadata?.orderId;
+
+        if (!orderId) {
+          this.logger.warn(
+            'Stripe Webhook: payment_intent.payment_failed without an orderId; ignored.',
+          );
+          break;
+        }
+
+        await this.markOrderAsFailed(
+          orderId,
+          intent.last_payment_error?.message || 'Card payment was declined',
+          intent.id,
+        );
+        break;
+      }
+
+      default:
+        this.logger.debug(`Unhandled Stripe event type '${event.type}' ignored.`);
     }
 
     return { received: true };
@@ -775,6 +902,16 @@ export class StoreOrdersService {
         return;
       }
 
+      // A late success on an order that was already cancelled or failed means the
+      // stock is back on the shelf and the invoice is void. Do not silently flip
+      // it to PAID - surface it so the payment can be refunded manually.
+      if (order.status !== ProductOrderStatus.PENDING) {
+        this.logger.error(
+          `Payment '${transactionReference}' succeeded for order '${order.businessId}' which is already '${order.status}'. Manual refund required.`,
+        );
+        return;
+      }
+
       await this.prisma.$transaction(async (tx) => {
         // 1. Update ProductOrder status
         await tx.productOrder.update({
@@ -803,16 +940,33 @@ export class StoreOrdersService {
             },
           });
 
-          await tx.payment.create({
-            data: {
-              invoiceId: invoice.id,
-              customerId: order.customerId,
-              amountUsd: new Prisma.Decimal(amountUsd || Number(order.totalUsd)),
-              status: PaymentStatus.SUCCEEDED,
-              methodLabel: 'Stripe Credit Card',
-              transactionReference,
-            },
+          // Promote the PENDING row written at checkout rather than inserting a
+          // second payment against the same invoice.
+          const pendingPayment = await tx.payment.findFirst({
+            where: { invoiceId: invoice.id, status: PaymentStatus.PENDING },
           });
+
+          const paymentData = {
+            amountUsd: new Prisma.Decimal(amountUsd || Number(order.totalUsd)),
+            status: PaymentStatus.SUCCEEDED,
+            methodLabel: 'Stripe Credit Card',
+            transactionReference,
+          };
+
+          if (pendingPayment) {
+            await tx.payment.update({
+              where: { id: pendingPayment.id },
+              data: paymentData,
+            });
+          } else {
+            await tx.payment.create({
+              data: {
+                invoiceId: invoice.id,
+                customerId: order.customerId,
+                ...paymentData,
+              },
+            });
+          }
         }
       });
 
@@ -841,6 +995,159 @@ export class StoreOrdersService {
       }
 
       this.logger.log(`Order '${order.businessId}' marked as PAID successfully.`);
+    } finally {
+      await this.redis.releaseLock(lockKey, lockToken);
+    }
+  }
+
+  /**
+   * Marks an order as FAILED after a declined, expired, or abandoned payment.
+   * Releases the inventory reserved at checkout, voids the unpaid invoice, and
+   * flips the pending payment row to FAILED.
+   *
+   * Shares the Redis lock with markOrderAsPaid so a success event and a failure
+   * event for the same order can never interleave, and only ever acts on an
+   * order still sitting in PENDING - which guarantees stock is restored once.
+   */
+  async markOrderAsFailed(
+    orderId: string,
+    reason: string,
+    transactionReference?: string,
+  ) {
+    const lockKey = `payment:order:${orderId}`;
+    const lockToken = await this.redis.acquireLock(lockKey, {
+      ttlMs: 15000,
+      retryCount: 1,
+      retryDelayMs: 300,
+    });
+
+    if (!lockToken) {
+      this.logger.warn(
+        `Parallel payment reconciliation blocked for order '${orderId}'. Lock already held.`,
+      );
+      return;
+    }
+
+    try {
+      const order = await this.prisma.productOrder.findUnique({
+        where: { id: orderId },
+        include: { invoices: true, items: true },
+      });
+
+      if (!order) {
+        this.logger.warn(
+          `Order '${orderId}' not found during payment failure processing`,
+        );
+        return;
+      }
+
+      // Only a PENDING order still holds reserved stock. Anything else has
+      // already been paid, cancelled, or failed - restoring again would
+      // double-credit inventory.
+      if (order.status !== ProductOrderStatus.PENDING) {
+        this.logger.warn(
+          `Ignoring payment failure for order '${order.businessId}': status is already '${order.status}'.`,
+        );
+        return;
+      }
+
+      await this.prisma.$transaction(async (tx) => {
+        // 1. Release the inventory reserved at checkout
+        for (const item of order.items) {
+          if (item.productId) {
+            await this.productsService.restoreProductStock(
+              item.productId,
+              item.quantity,
+              tx,
+            );
+          }
+        }
+
+        // 2. Flip the order to FAILED
+        await tx.productOrder.update({
+          where: { id: order.id },
+          data: { status: ProductOrderStatus.FAILED },
+        });
+
+        // 3. Write to Status History
+        await tx.productOrderStatusHistory.create({
+          data: {
+            orderId: order.id,
+            status: ProductOrderStatus.FAILED,
+            note: `Payment failed: ${reason}. Reserved inventory has been restored.`,
+            actorLabel: 'Stripe Webhook',
+          },
+        });
+
+        const invoice = order.invoices[0];
+        if (invoice) {
+          // 4. Void the unpaid invoice
+          if (invoice.status !== InvoiceStatus.PAID) {
+            await tx.invoice.update({
+              where: { id: invoice.id },
+              data: { status: InvoiceStatus.VOID },
+            });
+          }
+
+          // 5. Mark the pending payment FAILED (or record one if it is missing)
+          const pendingPayment = await tx.payment.findFirst({
+            where: { invoiceId: invoice.id, status: PaymentStatus.PENDING },
+          });
+
+          if (pendingPayment) {
+            await tx.payment.update({
+              where: { id: pendingPayment.id },
+              data: {
+                status: PaymentStatus.FAILED,
+                transactionReference:
+                  transactionReference || pendingPayment.transactionReference,
+              },
+            });
+          } else {
+            await tx.payment.create({
+              data: {
+                invoiceId: invoice.id,
+                customerId: order.customerId,
+                amountUsd: order.totalUsd,
+                status: PaymentStatus.FAILED,
+                methodLabel: 'Stripe Credit Card',
+                transactionReference:
+                  transactionReference || `STRIPE-FAILED-${order.businessId}`,
+              },
+            });
+          }
+        }
+      });
+
+      // Notify Customer so they can place the order again
+      const fullOrder = await this.prisma.productOrder.findUnique({
+        where: { id: orderId },
+        include: { customer: true },
+      });
+
+      if (fullOrder?.customer?.userId) {
+        this.notificationsService
+          .create({
+            userId: fullOrder.customer.userId,
+            type: NotificationType.ORDER_STATUS_UPDATE,
+            title: `Payment Failed for Order ${fullOrder.businessId}`,
+            message: `We could not process your payment of $${Number(fullOrder.totalUsd).toFixed(2)} USD. The order was not completed and the reserved items have been released.`,
+            ctaLabel: 'View Order',
+            ctaUrl: `/store/orders/${fullOrder.id}`,
+            metadata: { orderId: fullOrder.id, reason, transactionReference },
+            sendEmail: true,
+            priority: 1,
+          })
+          .catch((err) => {
+            this.logger.warn(
+              `Failed to notify customer of payment failure: ${err.message}`,
+            );
+          });
+      }
+
+      this.logger.log(
+        `Order '${order.businessId}' marked as FAILED (${reason}). Inventory restored.`,
+      );
     } finally {
       await this.redis.releaseLock(lockKey, lockToken);
     }
@@ -972,7 +1279,160 @@ export class StoreOrdersService {
       }
     }
 
-    return order;
+    let invoices = order.invoices;
+    if (!invoices || invoices.length === 0) {
+      try {
+        const businessId = await this.generateInvoiceBusinessId();
+        const dueDate = new Date(order.placedAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+        let invoiceStatus: InvoiceStatus = InvoiceStatus.ISSUED;
+        if (
+          order.status === ProductOrderStatus.PAID ||
+          order.status === ProductOrderStatus.PROCESSING ||
+          order.status === ProductOrderStatus.SHIPPED ||
+          order.status === ProductOrderStatus.DELIVERED
+        ) {
+          invoiceStatus = InvoiceStatus.PAID;
+        } else if (order.status === ProductOrderStatus.CANCELLED) {
+          invoiceStatus = InvoiceStatus.VOID;
+        }
+
+        const createdInvoice = await this.prisma.invoice.create({
+          data: {
+            businessId,
+            customerId: order.customerId,
+            productOrderId: order.id,
+            status: invoiceStatus,
+            dueDate,
+            paidAt: invoiceStatus === InvoiceStatus.PAID ? order.placedAt : null,
+            subtotalUsd: order.subtotalUsd,
+            taxUsd: order.taxUsd,
+            discountUsd: order.discountUsd,
+            totalUsd: order.totalUsd,
+            notes: `Order Invoice for ${order.businessId}`,
+            lineItems: {
+              create: order.items.map((item, idx) => ({
+                description: `${item.productName} (SKU: ${item.productSku || 'N/A'})`,
+                quantity: item.quantity,
+                unitPriceUsd: item.unitPriceUsd,
+                totalUsd: item.totalUsd,
+                sortOrder: idx + 1,
+              })),
+            },
+          },
+          include: {
+            lineItems: { orderBy: { sortOrder: 'asc' } },
+            payments: { orderBy: { processedAt: 'desc' } },
+            refunds: { orderBy: { processedAt: 'desc' } },
+          },
+        });
+        invoices = [createdInvoice];
+      } catch (err: any) {
+        this.logger.warn(
+          `Could not lazy-create invoice for order '${order.businessId}': ${err.message}`,
+        );
+      }
+    }
+
+    // Refunds hang off the invoice (the proof of payment), so surface a flat
+    // summary here rather than making clients dig through invoices[].refunds[].
+    const refunds = invoices.flatMap((invoice) => invoice.refunds || []);
+    const totalRefundedUsd = refunds
+      .filter((refund) => refund.status === 'COMPLETED')
+      .reduce((sum, refund) => sum + Number(refund.amountUsd), 0);
+
+    const primaryInvoice = invoices[0] || null;
+
+    return {
+      ...order,
+      invoices,
+      invoice: primaryInvoice
+        ? {
+            ...primaryInvoice,
+            downloadUrl: `/api/v1/store/invoices/orders/${order.id}/download`,
+            viewUrl: `/api/v1/store/invoices/orders/${order.id}`,
+          }
+        : null,
+      refundSummary: {
+        isRefunded: order.status === ProductOrderStatus.REFUNDED,
+        refundCount: refunds.length,
+        totalRefundedUsd: totalRefundedUsd.toFixed(2),
+        refunds: refunds.map((refund) => ({
+          id: refund.id,
+          invoiceId: refund.invoiceId,
+          paymentId: refund.paymentId,
+          amountUsd: Number(refund.amountUsd).toFixed(2),
+          status: refund.status,
+          reason: refund.reason,
+          stripeRefundId: refund.transactionReference,
+          processedAt: refund.processedAt,
+        })),
+      },
+    };
+  }
+
+  /**
+   * Issues a refund against the Stripe PaymentIntent that settled an order.
+   *
+   * Stripe creates refunds against a PaymentIntent (pi_...) or a Charge
+   * (ch_...) - never against a Checkout Session - which is why markOrderAsPaid
+   * persists the PaymentIntent id as the payment's transactionReference.
+   *
+   * Returns null when the payment did not settle through Stripe (COD, or an
+   * order paid before PaymentIntent ids were recorded) so the caller can fall
+   * back to an offline refund instead of failing the return.
+   */
+  async refundStripePayment(params: {
+    transactionReference: string | null;
+    amountUsd: number;
+    orderBusinessId: string;
+    reason?: string;
+  }): Promise<{ id: string; status: string; amountUsd: number } | null> {
+    const reference = params.transactionReference?.trim();
+
+    if (
+      !reference ||
+      !(reference.startsWith('pi_') || reference.startsWith('ch_'))
+    ) {
+      this.logger.warn(
+        `Order '${params.orderBusinessId}' has no refundable Stripe reference (found '${reference || 'none'}'). The refund must be returned to the customer offline.`,
+      );
+      return null;
+    }
+
+    if (!this.stripe) {
+      throw new ServiceUnavailableException(
+        'Stripe is not configured on this server, so the card refund cannot be issued.',
+      );
+    }
+
+    const refund = await this.stripe.refunds.create(
+      {
+        ...(reference.startsWith('pi_')
+          ? { payment_intent: reference }
+          : { charge: reference }),
+        amount: Math.round(params.amountUsd * 100),
+        reason: 'requested_by_customer',
+        metadata: {
+          orderBusinessId: params.orderBusinessId,
+          adminNote: params.reason?.slice(0, 400) || '',
+        },
+      },
+      {
+        // A double-clicked approval must never refund the customer twice.
+        idempotencyKey: `refund:order:${params.orderBusinessId}`,
+      },
+    );
+
+    this.logger.log(
+      `Stripe refund '${refund.id}' (${refund.status}) issued for order '${params.orderBusinessId}'.`,
+    );
+
+    return {
+      id: refund.id,
+      status: refund.status || 'unknown',
+      amountUsd: (refund.amount ?? 0) / 100,
+    };
   }
 
   async cancelOrder(id: string, user: RequestUser) {
@@ -1099,7 +1559,10 @@ export class StoreOrdersService {
         },
       });
 
-      // If status transitioned to DELIVERED / COMPLETED and it's COD with unpaid invoice: mark paid!
+      // Delivery settles a COD order: the courier collected the cash, so the
+      // pending COD payment becomes SUCCEEDED and the invoice becomes PAID.
+      // Deliberately scoped to the COD payment row - a card order that somehow
+      // reaches DELIVERED unpaid must NOT be silently marked as paid.
       if (
         (newStatus === ProductOrderStatus.DELIVERED ||
           newStatus === ProductOrderStatus.COMPLETED) &&
@@ -1107,25 +1570,41 @@ export class StoreOrdersService {
         order.invoices[0].status !== InvoiceStatus.PAID
       ) {
         const invoice = order.invoices[0];
-        await tx.invoice.update({
-          where: { id: invoice.id },
-          data: {
-            status: InvoiceStatus.PAID,
-            paidAt: new Date(),
-          },
-        });
-
-        const pendingPayment = invoice.payments.find(
-          (p) => p.status === PaymentStatus.PENDING,
+        const codPayment = invoice.payments.find(
+          (p) =>
+            p.status === PaymentStatus.PENDING &&
+            p.methodLabel === 'Cash on Delivery',
         );
-        if (pendingPayment) {
+
+        if (codPayment) {
+          await tx.invoice.update({
+            where: { id: invoice.id },
+            data: {
+              status: InvoiceStatus.PAID,
+              paidAt: new Date(),
+            },
+          });
+
           await tx.payment.update({
-            where: { id: pendingPayment.id },
+            where: { id: codPayment.id },
             data: {
               status: PaymentStatus.SUCCEEDED,
               processedAt: new Date(),
             },
           });
+
+          await tx.productOrderStatusHistory.create({
+            data: {
+              orderId: id,
+              status: newStatus,
+              note: `Cash on Delivery payment of $${Number(codPayment.amountUsd).toFixed(2)} collected on delivery. Invoice ${invoice.businessId} marked PAID.`,
+              actorLabel: `Admin (${user.email})`,
+            },
+          });
+        } else {
+          this.logger.warn(
+            `Order '${order.businessId}' reached ${newStatus} with an unpaid non-COD invoice '${invoice.businessId}'. Invoice left unpaid for manual review.`,
+          );
         }
       }
 

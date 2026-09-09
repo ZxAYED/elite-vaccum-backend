@@ -1,47 +1,41 @@
-// ==========================================
-// 8. TECHNICIANS & FIELD EXECUTION
-// ==========================================
-
 model Technician {
-  id                  String           @id @default(uuid()) @db.Uuid
-  userId              String           @unique @map("user_id") @db.Uuid
-  displayName         String           @map("display_name") @db.VarChar(150)
-  email               String           @db.VarChar(255)
-  phone               String           @db.VarChar(30)
-  status              TechnicianStatus @default(ACTIVE)
-  rating              Decimal          @default(5.00) @db.Decimal(3, 2)
-  completedJobs       Int              @default(0) @map("completed_jobs")
-  isVerified          Boolean          @default(true) @map("is_verified")
-  specializations     String[]         @default([])
-  avatarUrl           String?          @map("avatar_url") @db.VarChar(500)
-  availability        String           @default("AVAILABLE") @db.VarChar(50)
-  timezone            String           @default("America/New_York") @db.VarChar(100)
-  defaultAvailability Json?            @map("default_availability")
-  adminNotes          String?          @map("admin_notes") @db.Text
-  createdAt           DateTime         @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt           DateTime         @updatedAt @map("updated_at") @db.Timestamptz
-
-  user             User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  assignedRequests ServiceRequest[]          @relation("TechnicianServiceRequests")
-  assignedJobs     ServiceOrder[]            @relation("TechnicianAssignedJobs")
-  appointments     Appointment[]
-  serviceReports   TechnicianServiceReport[]
-  etas             TechnicianEta[]
+  id                  String                    @id @default(uuid()) @db.Uuid
+  userId              String                    @unique @map("user_id") @db.Uuid
+  displayName         String                    @map("display_name") @db.VarChar(150)
+  email               String                    @db.VarChar(255)
+  phone               String                    @db.VarChar(30)
+  status              TechnicianStatus          @default(ACTIVE)
+  rating              Decimal                   @default(5.00) @db.Decimal(3, 2)
+  completedJobs       Int                       @default(0) @map("completed_jobs")
+  isVerified          Boolean                   @default(true) @map("is_verified")
+  specializations     String[]                  @default([])
+  defaultAvailability Json?                     @map("default_availability")
+  adminNotes          String?                   @map("admin_notes")
+  createdAt           DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  availability        String                    @default("AVAILABLE") @db.VarChar(50)
+  avatarUrl           String?                   @map("avatar_url") @db.VarChar(500)
+  timezone            String                    @default("America/New_York") @db.VarChar(100)
+  appointments        Appointment[]
+  assignedJobs        ServiceOrder[]            @relation("TechnicianAssignedJobs")
+  assignedRequests    ServiceRequest[]          @relation("TechnicianServiceRequests")
+  etas                TechnicianEta[]
+  serviceReports      TechnicianServiceReport[]
+  user                User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([status])
   @@map("technicians")
 }
 
 model TechnicianEta {
-  id             String   @id @default(uuid()) @db.Uuid
-  serviceOrderId String   @map("service_order_id") @db.Uuid
-  technicianId   String   @map("technician_id") @db.Uuid
+  id             String       @id @default(uuid()) @db.Uuid
+  serviceOrderId String       @map("service_order_id") @db.Uuid
+  technicianId   String       @map("technician_id") @db.Uuid
   minutes        Int
-  updatedBy      String   @map("updated_by") @db.VarChar(100)
-  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz
-
-  serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
-  technician   Technician   @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  updatedBy      String       @map("updated_by") @db.VarChar(100)
+  updatedAt      DateTime     @default(now()) @map("updated_at") @db.Timestamptz(6)
+  serviceOrder   ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  technician     Technician   @relation(fields: [technicianId], references: [id], onDelete: Cascade)
 
   @@index([serviceOrderId])
   @@index([technicianId])
@@ -49,55 +43,52 @@ model TechnicianEta {
 }
 
 model TechnicianServiceReport {
-  id                String    @id @default(uuid()) @db.Uuid
-  serviceOrderId    String    @unique @map("service_order_id") @db.Uuid
-  technicianId      String    @map("technician_id") @db.Uuid
-  diagnosisFindings String    @map("diagnosis_findings") @db.Text
-  workPerformed     String    @map("work_performed") @db.Text
-  technicianNotes   String?   @map("technician_notes") @db.Text
-  recommendations   String?   @db.Text
-  submittedAt       DateTime? @map("submitted_at") @db.Timestamptz
-  lockedAt          DateTime? @map("locked_at") @db.Timestamptz
-  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz
-
-  serviceOrder ServiceOrder               @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
-  technician   Technician                 @relation(fields: [technicianId], references: [id], onDelete: Restrict)
-  partsUsed    TechnicianReportPart[]
-  evidence     TechnicianReportEvidence[]
+  id                String                     @id @default(uuid()) @db.Uuid
+  serviceOrderId    String                     @unique @map("service_order_id") @db.Uuid
+  technicianId      String                     @map("technician_id") @db.Uuid
+  diagnosisFindings String                     @map("diagnosis_findings")
+  workPerformed     String                     @map("work_performed")
+  technicianNotes   String?                    @map("technician_notes")
+  recommendations   String?
+  submittedAt       DateTime?                  @map("submitted_at") @db.Timestamptz(6)
+  lockedAt          DateTime?                  @map("locked_at") @db.Timestamptz(6)
+  createdAt         DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  evidence          TechnicianReportEvidence[]
+  partsUsed         TechnicianReportPart[]
+  serviceOrder      ServiceOrder               @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  technician        Technician                 @relation(fields: [technicianId], references: [id])
 
   @@index([technicianId])
   @@map("technician_service_reports")
 }
 
 model TechnicianReportPart {
-  id        String   @id @default(uuid()) @db.Uuid
-  reportId  String   @map("report_id") @db.Uuid
-  name      String   @db.VarChar(200)
-  sku       String?  @db.VarChar(100)
-  quantity  Int      @default(1)
-  note      String?  @db.Text
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  report TechnicianServiceReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  id        String                  @id @default(uuid()) @db.Uuid
+  reportId  String                  @map("report_id") @db.Uuid
+  name      String                  @db.VarChar(200)
+  sku       String?                 @db.VarChar(100)
+  quantity  Int                     @default(1)
+  note      String?
+  createdAt DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  report    TechnicianServiceReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
   @@index([reportId])
   @@map("technician_report_parts")
 }
 
 model TechnicianReportEvidence {
-  id         String           @id @default(uuid()) @db.Uuid
-  reportId   String           @map("report_id") @db.Uuid
+  id         String                  @id @default(uuid()) @db.Uuid
+  reportId   String                  @map("report_id") @db.Uuid
   stage      EvidenceStage
   category   EvidenceCategory
-  fileName   String           @map("file_name") @db.VarChar(255)
-  fileType   String           @map("file_type") @db.VarChar(100)
-  sizeBytes  Int              @map("size_bytes")
-  url        String           @db.VarChar(500)
-  note       String?          @db.Text
-  uploadedAt DateTime         @default(now()) @map("uploaded_at") @db.Timestamptz
-
-  report TechnicianServiceReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  fileName   String                  @map("file_name") @db.VarChar(255)
+  fileType   String                  @map("file_type") @db.VarChar(100)
+  sizeBytes  Int                     @map("size_bytes")
+  url        String                  @db.VarChar(500)
+  note       String?
+  uploadedAt DateTime                @default(now()) @map("uploaded_at") @db.Timestamptz(6)
+  report     TechnicianServiceReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
   @@index([reportId, stage])
   @@map("technician_report_evidence")

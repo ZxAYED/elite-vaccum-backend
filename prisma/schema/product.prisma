@@ -1,52 +1,46 @@
-// ==========================================
-// 4. PRODUCT CATALOG & E-COMMERCE
-// ==========================================
-
 model ProductCategory {
-  id          String   @id @default(uuid()) @db.Uuid
-  slug        String   @unique @db.VarChar(100)
-  name        String   @db.VarChar(100)
-  description String?  @db.Text
-  icon        String?  @db.VarChar(50) // Icon identifier for frontend (e.g. Wrench, Package, Cpu, Sparkles)
-  imageUrl    String?  @map("image_url") @db.VarChar(500)
-  status      String   @default("ACTIVE") @db.VarChar(50)
-  sortOrder   Int      @default(0) @map("sort_order")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  products Product[]
+  id          String    @id @default(uuid()) @db.Uuid
+  slug        String    @unique @db.VarChar(100)
+  name        String    @db.VarChar(100)
+  description String?
+  icon        String?   @db.VarChar(50)
+  imageUrl    String?   @map("image_url") @db.VarChar(500)
+  status      String    @default("ACTIVE") @db.VarChar(50)
+  sortOrder   Int       @default(0) @map("sort_order")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  products    Product[]
 
   @@map("product_categories")
 }
 
 model Product {
-  id             String              @id @default(uuid()) @db.Uuid
-  categoryId     String              @map("category_id") @db.Uuid
-  name           String              @db.VarChar(200)
-  sku            String?             @unique @db.VarChar(100)
-  model          String?             @db.VarChar(100)
-  summary        String              @db.Text
-  description    String              @db.Text
-  quantity       Int                 @default(1)
-  priceUsd       Decimal             @map("price_usd") @db.Decimal(10, 2)
-  status         ProductStatus       @default(ACTIVE)
-  availability   ProductAvailability @default(IN_STOCK)
-  taxable        Boolean             @default(true)
-  isFeatured     Boolean             @default(false) @map("is_featured")
-  shippingLabel  String?             @map("shipping_label") @db.VarChar(100)
-  popularityRank Int                 @default(0) @map("popularity_rank")
-  imageAlt       String              @map("image_alt") @db.VarChar(255)
-  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime            @updatedAt @map("updated_at") @db.Timestamptz
-
-  category       ProductCategory        @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  images         ProductImage[]
-  highlights     ProductHighlight[]
-  specifications ProductSpecification[]
-  shippingNotes  ProductShippingNote[]
+  id             String                 @id @default(uuid()) @db.Uuid
+  categoryId     String                 @map("category_id") @db.Uuid
+  name           String                 @db.VarChar(200)
+  sku            String?                @unique @db.VarChar(100)
+  model          String?                @db.VarChar(100)
+  summary        String
+  description    String
+  quantity       Int                    @default(1)
+  priceUsd       Decimal                @map("price_usd") @db.Decimal(10, 2)
+  status         ProductStatus          @default(ACTIVE)
+  availability   ProductAvailability    @default(IN_STOCK)
+  taxable        Boolean                @default(true)
+  shippingLabel  String?                @map("shipping_label") @db.VarChar(100)
+  popularityRank Int                    @default(0) @map("popularity_rank")
+  imageAlt       String                 @map("image_alt") @db.VarChar(255)
+  createdAt      DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+  isFeatured     Boolean                @default(false) @map("is_featured")
   cartItems      CartItem[]
-  orderItems     ProductOrderItem[]
   reviews        CustomerReview[]
+  highlights     ProductHighlight[]
+  images         ProductImage[]
+  orderItems     ProductOrderItem[]
+  shippingNotes  ProductShippingNote[]
+  specifications ProductSpecification[]
+  category       ProductCategory        @relation(fields: [categoryId], references: [id])
 
   @@index([categoryId, status])
   @@index([status, availability])
@@ -61,9 +55,8 @@ model ProductImage {
   alt       String   @db.VarChar(255)
   isPrimary Boolean  @default(false) @map("is_primary")
   sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([productId, sortOrder])
   @@map("product_images")
@@ -74,9 +67,8 @@ model ProductHighlight {
   productId String   @map("product_id") @db.Uuid
   text      String   @db.VarChar(255)
   sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([productId, sortOrder])
   @@map("product_highlights")
@@ -88,9 +80,8 @@ model ProductSpecification {
   label     String   @db.VarChar(100)
   value     String   @db.VarChar(255)
   sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([productId, sortOrder])
   @@map("product_specifications")
@@ -101,24 +92,22 @@ model ProductShippingNote {
   productId String   @map("product_id") @db.Uuid
   text      String   @db.VarChar(255)
   sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([productId, sortOrder])
   @@map("product_shipping_notes")
 }
 
 model Cart {
-  id          String   @id @default(uuid()) @db.Uuid
-  customerId  String?  @map("customer_id") @db.Uuid
-  guestId     String?  @unique @map("guest_id") @db.VarChar(100)
-  subtotalUsd Decimal  @default(0.00) @map("subtotal_usd") @db.Decimal(10, 2)
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  customer Customer?  @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  items    CartItem[]
+  id          String     @id @default(uuid()) @db.Uuid
+  customerId  String?    @map("customer_id") @db.Uuid
+  guestId     String?    @unique @map("guest_id") @db.VarChar(100)
+  subtotalUsd Decimal    @default(0.00) @map("subtotal_usd") @db.Decimal(10, 2)
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  items       CartItem[]
+  customer    Customer?  @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@index([customerId])
   @@map("carts")
@@ -130,39 +119,37 @@ model CartItem {
   productId    String   @map("product_id") @db.Uuid
   quantity     Int      @default(1)
   unitPriceUsd Decimal  @map("unit_price_usd") @db.Decimal(10, 2)
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  cart         Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product      Product  @relation(fields: [productId], references: [id])
 
   @@unique([cartId, productId])
   @@map("cart_items")
 }
 
 model ProductOrder {
-  id                String             @id @default(uuid()) @db.Uuid
-  businessId        String             @unique @map("business_id") @db.VarChar(50) // ORD-XXXXX
-  customerId        String             @map("customer_id") @db.Uuid
-  shippingAddressId String?            @map("shipping_address_id") @db.Uuid
-  status            ProductOrderStatus @default(PENDING)
-  trackingNumber    String?            @map("tracking_number") @db.VarChar(100)
-  shippingProvider  String?            @map("shipping_provider") @db.VarChar(100)
-  shippingAddress   Json               @map("shipping_address") // Permanent snapshot of shipping address
-  subtotalUsd       Decimal            @map("subtotal_usd") @db.Decimal(10, 2)
-  taxUsd            Decimal            @default(0.00) @map("tax_usd") @db.Decimal(10, 2)
-  shippingFeeUsd    Decimal            @default(0.00) @map("shipping_fee_usd") @db.Decimal(10, 2)
-  discountUsd       Decimal            @default(0.00) @map("discount_usd") @db.Decimal(10, 2)
-  totalUsd          Decimal            @map("total_usd") @db.Decimal(10, 2)
-  placedAt          DateTime           @default(now()) @map("placed_at") @db.Timestamptz
-  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz
-
-  customer      Customer                    @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  addressRef    CustomerAddress?            @relation("ProductOrderShippingAddress", fields: [shippingAddressId], references: [id], onDelete: SetNull)
-  items         ProductOrderItem[]
-  statusHistory ProductOrderStatusHistory[]
-  invoices      Invoice[]
-  reviews       CustomerReview[]
+  id                String                      @id @default(uuid()) @db.Uuid
+  businessId        String                      @unique @map("business_id") @db.VarChar(50)
+  customerId        String                      @map("customer_id") @db.Uuid
+  shippingAddressId String?                     @map("shipping_address_id") @db.Uuid
+  status            ProductOrderStatus          @default(PENDING)
+  trackingNumber    String?                     @map("tracking_number") @db.VarChar(100)
+  shippingProvider  String?                     @map("shipping_provider") @db.VarChar(100)
+  shippingAddress   Json                        @map("shipping_address")
+  subtotalUsd       Decimal                     @map("subtotal_usd") @db.Decimal(10, 2)
+  taxUsd            Decimal                     @default(0.00) @map("tax_usd") @db.Decimal(10, 2)
+  shippingFeeUsd    Decimal                     @default(0.00) @map("shipping_fee_usd") @db.Decimal(10, 2)
+  discountUsd       Decimal                     @default(0.00) @map("discount_usd") @db.Decimal(10, 2)
+  totalUsd          Decimal                     @map("total_usd") @db.Decimal(10, 2)
+  placedAt          DateTime                    @default(now()) @map("placed_at") @db.Timestamptz(6)
+  updatedAt         DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  reviews           CustomerReview[]
+  invoices          Invoice[]
+  items             ProductOrderItem[]
+  statusHistory     ProductOrderStatusHistory[]
+  customer          Customer                    @relation(fields: [customerId], references: [id])
+  addressRef        CustomerAddress?            @relation("ProductOrderShippingAddress", fields: [shippingAddressId], references: [id])
 
   @@index([customerId, status])
   @@index([placedAt])
@@ -171,19 +158,18 @@ model ProductOrder {
 }
 
 model ProductOrderItem {
-  id              String   @id @default(uuid()) @db.Uuid
-  orderId         String   @map("order_id") @db.Uuid
-  productId       String?  @map("product_id") @db.Uuid
-  productName     String   @map("product_name") @db.VarChar(200)
-  productSku      String?  @map("product_sku") @db.VarChar(100)
+  id              String       @id @default(uuid()) @db.Uuid
+  orderId         String       @map("order_id") @db.Uuid
+  productId       String?      @map("product_id") @db.Uuid
+  productName     String       @map("product_name") @db.VarChar(200)
+  productSku      String?      @map("product_sku") @db.VarChar(100)
   quantity        Int
-  unitPriceUsd    Decimal  @map("unit_price_usd") @db.Decimal(10, 2)
-  totalUsd        Decimal  @map("total_usd") @db.Decimal(10, 2)
-  productSnapshot Json?    @map("product_snapshot")
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  order   ProductOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
+  unitPriceUsd    Decimal      @map("unit_price_usd") @db.Decimal(10, 2)
+  totalUsd        Decimal      @map("total_usd") @db.Decimal(10, 2)
+  productSnapshot Json?        @map("product_snapshot")
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  order           ProductOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product         Product?     @relation(fields: [productId], references: [id])
 
   @@index([orderId])
   @@index([productId])
@@ -194,11 +180,10 @@ model ProductOrderStatusHistory {
   id         String             @id @default(uuid()) @db.Uuid
   orderId    String             @map("order_id") @db.Uuid
   status     ProductOrderStatus
-  note       String?            @db.Text
+  note       String?
   actorLabel String             @map("actor_label") @db.VarChar(100)
-  changedAt  DateTime           @default(now()) @map("changed_at") @db.Timestamptz
-
-  order ProductOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  changedAt  DateTime           @default(now()) @map("changed_at") @db.Timestamptz(6)
+  order      ProductOrder       @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId, changedAt])
   @@map("product_order_status_history")

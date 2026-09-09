@@ -20,7 +20,12 @@
 </p>
 
 <p align="center">
+  <a href="https://elite-vaccum-frontend.vercel.app"><img src="https://img.shields.io/badge/🌐_Live_Demo-elite--vaccum--frontend.vercel.app-00C853?style=for-the-badge&logo=vercel&logoColor=white" alt="Live Demo" /></a>
+</p>
+
+<p align="center">
   <a href="#-production-engineering-highlights--architecture-innovations">Engineering Highlights</a> &bull;
+  <a href="#-comprehensive-feature-architecture--key-capabilities">Core Features</a> &bull;
   <a href="#-system-architecture">Architecture</a> &bull;
   <a href="#-frontend-api-integration-guide">API Guide (17 Phases)</a> &bull;
   <a href="#-role-based-workflow-architecture-admin-vs-customer-vs-technician">Role Workflows</a> &bull;
@@ -128,41 +133,97 @@
 
 ---
 
-## 🚀 Key Capabilities
+## 🚀 Comprehensive Feature Architecture & Key Capabilities
 
-### 🛠️ Service Intake & Scheduling Engine
-- **Fixed Service Catalog & Symptom Mapping**: 10 curated central vacuum services with 8 diagnostic symptoms (`LOW_SUCTION`, `CLOG`, `ODOR`, `ELECTRICAL`, etc.).
-- **Customer-Driven Slot Engine**: Live availability checking across 5 standard dispatch windows (`GET /schedule/slots`), automatic appointment locking on intake submission, conflict prevention, and admin rescheduling.
-- **Quotations & Order Lifecycle**: Revisions tracking, PDF previews, and instant auto-conversion into scheduled `ServiceOrder` records upon customer acceptance.
+### 🛠️ 1. Service Intake, Diagnostic Engine & Slot Booking (`src/services`)
+- **Fixed Service Catalog**: 10 curated central vacuum residential & commercial services with transparent base pricing, estimated durations, and service scopes.
+- **Diagnostic Symptom Mapping**: 8 built-in diagnostic symptoms (`LOW_SUCTION`, `CLOG`, `ODOR`, `ELECTRICAL`, `MOTOR_BURNT`, `PIPE_LEAK`, `INLET_LOOSE`, `NOISE`) linking customer symptoms directly to repair protocols.
+- **Dynamic Slot Availability Engine**: Real-time slot calculation across 5 standard dispatch windows (`8am-10am`, `10am-12pm`, `12pm-2pm`, `2pm-4pm`, `4pm-6pm`) via `GET /schedule/slots`.
+- **Conflict Prevention & Distributed Locking**: Enforces working hours, technician capacity, holiday blackouts, and Redlock distributed locking on slot booking to eliminate double-booking.
+- **Service Request Lifecycle**: Tracks customer intake from `SUBMITTED` &rarr; `UNDER_REVIEW` &rarr; `QUOTED` &rarr; `SCHEDULED` &rarr; `IN_PROGRESS` &rarr; `COMPLETED` &rarr; `CANCELLED`.
 
-### 🛒 E-Commerce Store & Checkout
-- **Unified Product Catalog**: Filterable products, hierarchical categories, stock levels, and related parts.
-- **Cart Management**: High-speed authenticated cart cached in Redis with instant DB synchronizations.
-- **Checkout & Order Tracking**: Stripe Sessions / PaymentIntents, Cash On Delivery (COD), order tracking timeline, and automatic invoice settlement.
+### 📋 2. Quotations & Interactive Estimation Workflow (`src/quotations`)
+- **Itemized Estimation Engine**: Line-item breakdown covering labor hours, replacement parts (power units, motors, inlet valves), and travel fees with subtotal, tax, and discount computations.
+- **Immutable Revision History**: Every quotation amendment creates an auditable revision snapshot (`rejectionHistory`), preserving original line items and price negotiations.
+- **Interactive Customer Approval**: Customers review and act directly via `POST /quotations/:id/accept` or `POST /quotations/:id/reject` (with rejection reason capture).
+- **Atomic Auto-Provisioning**: Customer acceptance triggers a single ACID transaction that automatically creates a `ServiceOrder`, reserves the `Appointment`, generates status history, and issues an `Invoice`.
+- **Online Quotation Prepayment**: Stripe Checkout session generation (`createQuotationStripeCheckoutSession`) allowing customers to pay quotation deposits or full amounts online.
 
-### ⚡ Distributed Redis Infrastructure
-- **Distributed Locks**: Multi-instance Redlock pattern for payment settlement, stock reservation, and atomic quota locks.
-- **Redis Presence Tracker**: Real-time connected device and session tracking (`RedisPresenceService`) with 0 in-memory leaks.
-- **High-Speed Cache**: 60s/300s TTL caches on service offerings, unread notification counts, and product catalog metadata.
+### 🚐 3. Field Technician Fleet & Real-Time Dispatch Operations (`src/technicians`, `src/service-orders`)
+- **Technician Profiles & Skill Mapping**: Tracks technician certification tiers, specialized skills (e.g. pipe tracing, motor rebuilds), service radius, and active dispatch status.
+- **Centralized Admin Dispatch Board**: Visual dispatch board for assigning or reassigning technicians to service orders with workload balancing.
+- **Mobile Field Execution Workflow**: Step-by-step field status progression (`ASSIGNED` &rarr; `DISPATCHED` &rarr; `ON_THE_WAY` &rarr; `ARRIVED` &rarr; `IN_PROGRESS` &rarr; `COMPLETED`).
+- **Live Arrival ETA Broadcasts**: Technicians submit live minutes-to-arrival updates (`POST /service-orders/:id/eta`), triggering instant WebSocket broadcast alerts to the customer.
+- **Completion Reports & Diagnostic Notes**: Technicians record diagnostic findings, parts consumed, warranty tags, and customer sign-off on job completion.
+- **Automated Appointment Sync**: Status transitions automatically synchronize linked appointment records across the platform.
 
-### 🔔 BullMQ + Pub/Sub Real-Time Notifications
-- **Background Worker Processing**: Dedicated BullMQ queue (`notifications-delivery`) with worker concurrency, exponential retry backoff, and rate limiting (25 jobs/sec).
-- **Cross-Node WebSocket Delivery**: Subscribed across cluster nodes via Redis Pub/Sub channels (`notifications:events`) to broadcast to rooms (`user:<id>`, `role:<ROLE>`, `broadcast`).
-- **Omnichannel Support**: In-app unread inbox counter, persistent PostgreSQL storage, and SMTP email notifications.
+### 🛒 4. Enterprise E-Commerce Store & Cart (`src/store`)
+- **Product Catalog Management**: Faceted filtering by category, brand, power unit wattage, filtration type, and pricing with instant full-text search across SKU and model numbers.
+- **Media Optimization**: Direct Cloudinary integration supporting multiple product gallery images with designated primary thumbnails.
+- **High-Performance Redis Cart**: Authenticated shopping cart cached in Upstash Redis with instant PostgreSQL synchronization and item pricing verification.
+- **Stripe Checkout & Cash on Delivery (COD)**: Supports dual checkout rails: hosted Stripe Checkout sessions with line-item detail and Cash on Delivery with immediate inventory reservation.
+- **Stock Decrement & Distributed Locks**: Concurrency-protected inventory deduction using Redlock; automated stock restoration upon expired sessions or payment failures.
+- **Order Tracking Timeline**: Full fulfillment tracking with shipping carrier (`shippingProvider`), tracking number, and status milestones (`PENDING` &rarr; `PAID` &rarr; `PROCESSING` &rarr; `SHIPPED` &rarr; `DELIVERED`).
 
-### 💬 Enterprise Real-Time Live Support Chat
+### 📦 5. Returns & Automated Refund Management (`src/store/returns`)
+- **Customer Return Requests (RMA)**: Customers initiate return requests specifying items, quantities, condition, and return reason.
+- **Return Status Pipeline**: Managed progression through `REQUESTED` &rarr; `APPROVED` &rarr; `RECEIVED` &rarr; `INSPECTED` &rarr; `REFUNDED` / `REJECTED`.
+- **Automated Stripe Refund Processing**: Approved returns trigger automated partial or full refunds against the originating Stripe PaymentIntent (`re_...`) via `refundStripePayment`.
+- **Zero-Double-Restock Protection**: Strict pre-condition validation prevents double-increment of product inventory when managing cancellations and returns.
+
+### 🧾 6. Universal Invoicing, Multi-Tender Payments & Billing (`src/billing`, `src/store/invoice`)
+- **Unified Multi-Source Invoice Model**: Single normalized invoice architecture supporting Store Orders (`ProductOrder`), Field Services (`ServiceOrder`), Quotations (`Quotation`), and custom Admin Billing.
+- **Guaranteed Order Invoice Integration**: Order details (`GET /store/orders/:id`) returns the full invoice structure (both `invoices[]` and primary `invoice`) complete with line items, payments, refunds, and direct PDF view/download links.
+- **Dual PDF Generation & Direct Streaming**:
+  - Binary PDF file generation and streaming download (`GET /store/invoices/orders/:orderId/download`).
+  - Dynamic, printable HTML invoice endpoint (`GET /billing/invoices/:id/html`).
+- **Online Stripe Invoice Payments**: Customers can settle outstanding service invoices directly using Stripe PaymentIntents (`POST /billing/invoices/:id/stripe/payment-intent` & `POST /billing/invoices/:id/stripe/confirm`).
+- **Multi-Tender Payment & Refund Ledger**: Records Stripe, Cash, Check, and Credit Card payments with full refund audit trails.
+
+### 👤 7. Customer CRM & Central Vacuum Equipment Vault (`src/customers`)
+- **Comprehensive Customer Profiles**: Residential & commercial account classification, primary phone, email, and billing records.
+- **Multi-Address Management**: Saved customer addresses with default shipping/billing designations and tamper-proof ownership verification during checkout.
+- **Central Vacuum Equipment Registry**: Tracks installed equipment per customer (power unit model, serial number, pipe inlet count, installation year, filtration type).
+- **Service & Purchase History**: Unified view of past repair tickets, service orders, quotations, and store purchases linked to the customer account.
+- **Internal CRM Notes**: Private staff notes for dispatchers and customer support representatives.
+
+### ⭐ 8. Customer Reviews & Reputation Moderation System (`src/reviews`)
+- **Dual-Domain Feedback**: Supports verified customer reviews for Store Products and Technician On-Site Services.
+- **Verified Purchase / Service Guard**: Validates that the customer has genuinely purchased the product or completed the service before permitting review submission.
+- **Rating Distribution & Analytics**: Automatic calculation of average ratings, 1-to-5 star breakdowns, and review counts.
+- **Admin Moderation Queue**: Workflow for screening customer reviews (`PENDING` &rarr; `PUBLISHED` / `REJECTED`) with moderation reason logging.
+
+### 🤖 9. Google Gemini AI Diagnostics & Streaming Assistant (`src/ai`)
+- **Real-Time Streaming SSE Chat**: Server-Sent Events streaming chat endpoint (`POST /ai/chat/stream`) powered by Google Gemini 1.5 Flash.
+- **Structured Symptom Extraction**: Natural language intake analysis extracting symptoms (`LOW_SUCTION`, `CLOG`, `ODOR`, etc.), urgency scores, and recommended actions using structured output schemas.
+- **Live Database Tool Calling**: Gemini integrates directly with real-time Prisma DB queries to check active service catalog items, product inventory, and customer equipment history.
+- **Intelligent CTAs**: Dynamically provides actionable deep links to book matching service appointments or purchase replacement filters/accessories.
+
+### 💬 10. Enterprise Real-Time Live Support Chat (`src/chat`)
 - **Dual Communication Channels**: High-performance Socket.io WebSocket (`/chat` namespace) + REST fallback with Cloudinary photo/file uploads.
-- **Cluster Synchronization via Redis Pub/Sub**: Multi-server instant message broadcast, typing indicators, and read receipts (<10ms).
+- **Cluster Synchronization via Redis Pub/Sub**: Multi-server instant message broadcast, typing indicators, and read receipts with `<10ms` latency.
 - **BullMQ Offline Resilience**: Automatic 2-minute delayed offline check to dispatch email alerts when users or admins are away from their screens.
+- **Zero-Memory-Leak Presence Tracker**: Tracks connected devices in Redis sets without in-memory leak vulnerabilities.
 
-### 🤖 Google Gemini AI Diagnostics & Live DB Querying
-- **Natural Language Intake Analysis**: Extracts structured symptoms, urgency recommendations, and follow-up troubleshooting prompts using Gemini structured output.
-- **Live Database Tools**: Queries real-time active services, live products, real customer history, and service orders with graceful fallback.
+### 🔔 11. Real-Time Notifications & BullMQ Background Queues (`src/notifications`)
+- **Multi-Channel Delivery**: In-app unread badge counter, persistent PostgreSQL notification log, and formatted HTML SMTP email alerts.
+- **Dedicated BullMQ Queue (`notifications-delivery`)**: Asynchronous worker processing with concurrency, rate limiting (25 jobs/sec), and exponential backoff retry policies.
+- **Cross-Node WebSocket Mesh**: Subscribed across cluster nodes via Redis Pub/Sub channels (`notifications:events`) to broadcast to rooms (`user:<id>`, `role:<ROLE>`, `broadcast`).
+- **Comprehensive Event Matrix**: Instant alerts across order updates, dispatch events, quotation approvals, invoices, and technician ETAs.
 
-### 🛡️ Enterprise Security & Multi-Tier Rate Limiting
-- **Global Throttling**: `@nestjs/throttler` layered rate limiting (`15 req/sec`, `60 req/10s`, `200 req/min`) protecting against DDoS and automated attacks.
-- **Atomic OTP Rate Limiting**: Dedicated Redis OTP flood prevention (max 4 attempts / 5 mins).
-- **Session Control**: HttpOnly cookie refresh tokens, JWT Bearer verification, and revocable database sessions.
+### 📊 12. Executive Analytics, KPI Dashboards & Streaming CSV Pipeline (`src/reports`, `src/analytics`)
+- **Executive KPI Dashboard**: Real-time business metrics including revenue trends, order volumes, repair ticket averages, technician utilization, and customer retention.
+- **High-Throughput Streaming CSV Exports**: Zero-disk streaming CSV downloads for Orders, Service Requests, Invoices, and Customers with immediate HTTP response headers.
+
+### ⚙️ 13. Platform Settings & Operational Control (`src/settings`)
+- **Dynamic Business Operations**: Configurable working hours, dispatch slots, emergency surcharge rates, and holiday blackout calendars.
+- **System Maintenance Controls**: Global operational flags and maintenance mode toggles.
+
+### 🛡️ 14. Enterprise Security, Multi-Tier Rate Limiting & Concurrency (`src/auth`, `src/common`)
+- **Single Unified Authentication**: One login entrypoint (`POST /auth/login`) securely handling `CUSTOMER`, `ADMIN`, and `TECHNICIAN` roles without duplicate silos.
+- **Layered Throttling Security**: Granular endpoint rate limiting protecting against brute force on OTP verification, login, and password reset alongside global API rate limits.
+- **HttpOnly Cookie Token Rotation**: Refresh tokens isolated from client JavaScript with automatic session revocation.
+- **Redlock Distributed Locking**: Concurrency serialization across payments, slot reservations, and cart updates.
 
 ---
 

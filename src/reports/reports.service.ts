@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   InvoiceStatus,
   PaymentStatus,
+  Prisma,
   ProductOrderStatus,
   QuotationStatus,
   ServiceOrderStatus,
@@ -54,6 +55,7 @@ export class ReportsService {
     if (cached) return cached;
 
     const { from, to } = this.getDateRange(query);
+    const orderType = query.orderType || 'ALL';
 
     const [
       allPayments,
@@ -69,18 +71,33 @@ export class ReportsService {
       funnelQuoteAccepted,
       funnelServiceOrders,
       funnelCompleted,
+      awaitingQuoteCount,
+      awaitingQuoteLatest,
     ] = await Promise.all([
-      // Completed Payments
+      // Completed Payments within the requested window
       this.prisma.payment.findMany({
-        where: { status: PaymentStatus.SUCCEEDED },
+        where: {
+          status: PaymentStatus.SUCCEEDED,
+          processedAt: { gte: from, lte: to },
+          ...(orderType === 'PRODUCT'
+            ? { invoice: { productOrderId: { not: null } } }
+            : orderType === 'SERVICE'
+              ? { invoice: { serviceOrderId: { not: null } } }
+              : {}),
+        },
         select: {
           amountUsd: true,
           processedAt: true,
           invoice: { select: { productOrderId: true, serviceOrderId: true } },
         },
       }),
-      // Refunds
+      // Refunds - only settled ones. A MANUAL_REQUIRED refund is money that has
+      // NOT left the account yet and must not be deducted from revenue.
       this.prisma.refund.findMany({
+        where: {
+          status: 'COMPLETED',
+          processedAt: { gte: from, lte: to },
+        },
         select: { amountUsd: true },
       }),
       // Counts
@@ -104,6 +121,51 @@ export class ReportsService {
       this.prisma.quotation.count({ where: { status: QuotationStatus.ACCEPTED } }),
       this.prisma.serviceOrder.count(),
       this.prisma.serviceOrder.count({ where: { status: ServiceOrderStatus.COMPLETED } }),
+
+      // Service requests raised but never quoted - the admin's work queue.
+      // "Not quoted" means no Quotation row exists at all, and the request is
+      // still live (not cancelled, rejected, or already past quoting).
+      this.prisma.serviceRequest.count({
+        where: {
+          quotations: { none: {} },
+          status: {
+            in: [
+              ServiceRequestStatus.SUBMITTED,
+              ServiceRequestStatus.UNDER_REVIEW,
+              ServiceRequestStatus.ACCEPTED,
+            ],
+          },
+        },
+      }),
+      this.prisma.serviceRequest.findMany({
+        where: {
+          quotations: { none: {} },
+          status: {
+            in: [
+              ServiceRequestStatus.SUBMITTED,
+              ServiceRequestStatus.UNDER_REVIEW,
+              ServiceRequestStatus.ACCEPTED,
+            ],
+          },
+        },
+        orderBy: { submittedAt: 'desc' },
+        take: 10,
+        select: {
+          id: true,
+          businessId: true,
+          title: true,
+          status: true,
+          urgency: true,
+          preferredDate: true,
+          preferredTime: true,
+          propertyLabel: true,
+          estimatedAmountUsd: true,
+          submittedAt: true,
+          customer: { select: { id: true, displayName: true, email: true, phone: true } },
+          service: { select: { id: true, name: true } },
+          assignedTechnician: { select: { id: true, displayName: true } },
+        },
+      }),
     ]);
 
     const totalPaymentsUsd = allPayments.reduce((sum, p) => sum + Number(p.amountUsd), 0);
@@ -166,6 +228,32 @@ export class ReportsService {
           serviceOrder: funnelServiceOrders,
           completed: funnelCompleted,
         },
+        // Requests waiting on a quotation: the count for the KPI card, the 10
+        // most recent for the dashboard list.
+        awaitingQuotation: {
+          totalCount: awaitingQuoteCount,
+          items: awaitingQuoteLatest.map((request) => ({
+            id: request.id,
+            businessId: request.businessId,
+            title: request.title,
+            status: request.status,
+            urgency: request.urgency,
+            serviceName: request.service?.name || null,
+            customerName: request.customer?.displayName || null,
+            customerEmail: request.customer?.email || null,
+            customerPhone: request.customer?.phone || null,
+            propertyLabel: request.propertyLabel,
+            preferredDate: request.preferredDate,
+            preferredTime: request.preferredTime,
+            estimatedAmountUsd:
+              request.estimatedAmountUsd !== null
+                ? Number(request.estimatedAmountUsd).toFixed(2)
+                : null,
+            assignedTechnician: request.assignedTechnician?.displayName || null,
+            submittedAt: request.submittedAt,
+          })),
+        },
+        dateRange: { from, to, orderType },
       },
     };
 
@@ -182,48 +270,44 @@ export class ReportsService {
     const cached = await this.redis.get<any>(cacheKey);
     if (cached) return cached;
 
-    const orders = await this.prisma.productOrder.findMany({
-      where: { status: { not: ProductOrderStatus.CANCELLED } },
-      include: {
-        items: {
-          include: {
-            product: { select: { id: true, name: true, priceUsd: true } },
-          },
-        },
-      },
-    });
+    const { from, to } = this.getDateRange(query);
 
-    const totalSalesUsd = orders.reduce((sum, o) => sum + Number(o.totalUsd), 0);
-    const averageOrderValueUsd = orders.length > 0 ? totalSalesUsd / orders.length : 0;
+    const orderWhere: Prisma.ProductOrderWhereInput = {
+      status: { not: ProductOrderStatus.CANCELLED },
+      placedAt: { gte: from, lte: to },
+    };
 
-    // Top selling products
-    const productMap: Record<string, { name: string; quantity: number; revenue: number }> = {};
-    orders.forEach((o) => {
-      o.items.forEach((item) => {
-        const pId = item.productId || item.productName;
-        if (!productMap[pId]) {
-          productMap[pId] = {
-            name: item.product?.name || item.productName,
-            quantity: 0,
-            revenue: 0,
-          };
-        }
-        productMap[pId].quantity += item.quantity;
-        productMap[pId].revenue += Number(item.totalUsd);
-      });
-    });
-
-    const topProducts = Object.values(productMap)
-      .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, 5);
+    // Totals and the top-product ranking are computed by Postgres. The previous
+    // version pulled every order AND every line item into memory to do it.
+    const [orderAgg, topItems] = await Promise.all([
+      this.prisma.productOrder.aggregate({
+        _sum: { totalUsd: true },
+        _avg: { totalUsd: true },
+        _count: { _all: true },
+        where: orderWhere,
+      }),
+      this.prisma.productOrderItem.groupBy({
+        by: ['productId', 'productName'],
+        _sum: { quantity: true, totalUsd: true },
+        where: { order: orderWhere },
+        orderBy: { _sum: { totalUsd: 'desc' } },
+        take: 5,
+      }),
+    ]);
 
     const result = {
       success: true,
       data: {
-        totalSalesUsd: Number(totalSalesUsd.toFixed(2)),
-        averageOrderValueUsd: Number(averageOrderValueUsd.toFixed(2)),
-        totalProductOrders: orders.length,
-        topProducts,
+        totalSalesUsd: Number(Number(orderAgg._sum.totalUsd || 0).toFixed(2)),
+        averageOrderValueUsd: Number(Number(orderAgg._avg.totalUsd || 0).toFixed(2)),
+        totalProductOrders: orderAgg._count._all,
+        topProducts: topItems.map((item) => ({
+          productId: item.productId,
+          name: item.productName,
+          quantity: item._sum.quantity || 0,
+          revenue: Number(Number(item._sum.totalUsd || 0).toFixed(2)),
+        })),
+        dateRange: { from, to },
       },
     };
 
@@ -240,25 +324,46 @@ export class ReportsService {
     const cached = await this.redis.get<any>(cacheKey);
     if (cached) return cached;
 
-    const requests = await this.prisma.serviceRequest.findMany({
-      include: { service: { select: { name: true, category: true } } },
-    });
+    const { from, to } = this.getDateRange(query);
+    const where: Prisma.ServiceRequestWhereInput = {
+      submittedAt: { gte: from, lte: to },
+    };
 
-    const serviceCounts: Record<string, number> = {};
-    requests.forEach((r) => {
-      const name = r.service?.name || 'General Vacuum Service';
-      serviceCounts[name] = (serviceCounts[name] || 0) + 1;
-    });
+    // Grouped in the database rather than by loading every request into node.
+    const [totalRequests, grouped] = await Promise.all([
+      this.prisma.serviceRequest.count({ where }),
+      this.prisma.serviceRequest.groupBy({
+        by: ['serviceId'],
+        _count: { _all: true },
+        where,
+        orderBy: { _count: { serviceId: 'desc' } },
+      }),
+    ]);
 
-    const topServices = Object.entries(serviceCounts)
-      .map(([serviceName, count]) => ({ serviceName, count }))
-      .sort((a, b) => b.count - a.count);
+    const services = grouped.length
+      ? await this.prisma.service.findMany({
+          where: { id: { in: grouped.map((g) => g.serviceId) } },
+          select: { id: true, name: true, category: true },
+        })
+      : [];
+
+    const serviceById = new Map(services.map((s) => [s.id, s]));
 
     const result = {
       success: true,
       data: {
-        totalRequests: requests.length,
-        topServices,
+        totalRequests,
+        topServices: grouped.map((row) => ({
+          serviceId: row.serviceId,
+          serviceName:
+            serviceById.get(row.serviceId)?.name || 'General Vacuum Service',
+          category: serviceById.get(row.serviceId)?.category || null,
+          count: row._count._all,
+          percentage: totalRequests
+            ? Number(((row._count._all / totalRequests) * 100).toFixed(1))
+            : 0,
+        })),
+        dateRange: { from, to },
       },
     };
 

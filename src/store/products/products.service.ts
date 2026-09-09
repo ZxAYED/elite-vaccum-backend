@@ -1061,30 +1061,40 @@ export class StoreProductsService {
     tx?: Prisma.TransactionClient,
   ) {
     const client = tx || this.prisma;
-    const product = await client.product.findUnique({
+
+    // 1. Atomic increment. A read-then-write would lose an update when two
+    // restores race (e.g. an order cancellation and a failed-payment webhook),
+    // silently under-crediting inventory.
+    const restoreResult = await client.product.updateMany({
       where: { id: productId },
-      select: { id: true, sku: true, quantity: true, availability: true },
+      data: { quantity: { increment: quantity } },
     });
 
-    if (!product) {
+    if (restoreResult.count === 0) {
       throw new NotFoundException('Product not found');
     }
 
-    const newQuantity = product.quantity + quantity;
-    const newAvailability = this.resolveSynchronizedAvailability(
-      newQuantity,
-      product.availability,
-    );
-
-    const updated = await client.product.update({
+    // 2. Fetch updated product and adjust availability flag
+    const updated = await client.product.findUnique({
       where: { id: productId },
-      data: {
-        quantity: newQuantity,
-        availability: newAvailability,
-      },
     });
 
-    await this.invalidateProductCache(productId, product.sku);
+    if (updated) {
+      const newAvailability = this.resolveSynchronizedAvailability(
+        updated.quantity,
+        updated.availability,
+      );
+
+      if (newAvailability !== updated.availability) {
+        await client.product.update({
+          where: { id: productId },
+          data: { availability: newAvailability },
+        });
+      }
+
+      await this.invalidateProductCache(productId, updated.sku);
+    }
+
     return updated;
   }
 

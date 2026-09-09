@@ -1,7 +1,3 @@
-// ==========================================
-// 1. ENUMS
-// ==========================================
-
 enum UserRole {
   CUSTOMER
   TECHNICIAN
@@ -53,9 +49,9 @@ enum ProductAvailability {
   IN_STOCK
   LOW_STOCK
   OUT_OF_STOCK
-  PREORDER
   BACKORDER
   DISCONTINUED
+  PREORDER
 }
 
 enum ServiceGroup {

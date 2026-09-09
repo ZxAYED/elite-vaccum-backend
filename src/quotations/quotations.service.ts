@@ -577,19 +577,29 @@ export class QuotationsService {
     user?: RequestUser | null,
   ): Promise<{ id: string; url: string }> {
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    const successUrl = (
+    const configuredSuccess =
       process.env.STRIPE_QUOTATION_SUCCESS_URL ||
-      `${frontendUrl}/user/quotations/${quotation.id}?payment=success&session_id={CHECKOUT_SESSION_ID}`
-    )
-      .replace('{QUOTATION_ID}', quotation.id)
-      .replace('{BUSINESS_ID}', quotation.businessId);
+      `${frontendUrl}/user/quotations/${quotation.id}?payment=success&session_id={CHECKOUT_SESSION_ID}`;
 
-    const cancelUrl = (
-      process.env.STRIPE_QUOTATION_CANCEL_URL ||
-      `${frontendUrl}/user/quotations/${quotation.id}?payment=cancelled`
-    )
+    const successUrl = configuredSuccess
       .replace('{QUOTATION_ID}', quotation.id)
-      .replace('{BUSINESS_ID}', quotation.businessId);
+      .replace('${quotation.id}', quotation.id)
+      .replace('{BUSINESS_ID}', quotation.businessId)
+      .replace('${quotation.businessId}', quotation.businessId)
+      .replace('{SERVICE_REQUEST_ID}', quotation.serviceRequestId || '')
+      .replace('${quotation.serviceRequestId}', quotation.serviceRequestId || '');
+
+    const configuredCancel =
+      process.env.STRIPE_QUOTATION_CANCEL_URL ||
+      `${frontendUrl}/user/quotations/${quotation.id}?payment=cancelled`;
+
+    const cancelUrl = configuredCancel
+      .replace('{QUOTATION_ID}', quotation.id)
+      .replace('${quotation.id}', quotation.id)
+      .replace('{BUSINESS_ID}', quotation.businessId)
+      .replace('${quotation.businessId}', quotation.businessId)
+      .replace('{SERVICE_REQUEST_ID}', quotation.serviceRequestId || '')
+      .replace('${quotation.serviceRequestId}', quotation.serviceRequestId || '');
 
     if (!this.stripe) {
       return {
