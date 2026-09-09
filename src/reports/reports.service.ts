@@ -45,6 +45,67 @@ export class ReportsService {
     return { from, to };
   }
 
+  private async getRevenueEntries(
+    from: Date,
+    to: Date,
+    orderType: ReportsQueryDto['orderType'] = 'ALL',
+  ) {
+    const invoiceTypeWhere =
+      orderType === 'PRODUCT'
+        ? { productOrderId: { not: null } }
+        : orderType === 'SERVICE'
+          ? { serviceOrderId: { not: null } }
+          : {};
+
+    const [payments, paidInvoicesWithoutPayments] = await Promise.all([
+      this.prisma.payment.findMany({
+        where: {
+          status: PaymentStatus.SUCCEEDED,
+          processedAt: { gte: from, lte: to },
+          invoice: invoiceTypeWhere,
+        },
+        select: {
+          amountUsd: true,
+          processedAt: true,
+          invoice: { select: { productOrderId: true, serviceOrderId: true } },
+        },
+      }),
+      this.prisma.invoice.findMany({
+        where: {
+          status: InvoiceStatus.PAID,
+          payments: { none: { status: PaymentStatus.SUCCEEDED } },
+          OR: [
+            { paidAt: { gte: from, lte: to } },
+            { paidAt: null, updatedAt: { gte: from, lte: to } },
+          ],
+          ...invoiceTypeWhere,
+        },
+        select: {
+          totalUsd: true,
+          paidAt: true,
+          updatedAt: true,
+          productOrderId: true,
+          serviceOrderId: true,
+        },
+      }),
+    ]);
+
+    return [
+      ...payments.map((payment) => ({
+        amountUsd: Number(payment.amountUsd),
+        occurredAt: payment.processedAt,
+        productOrderId: payment.invoice.productOrderId,
+        serviceOrderId: payment.invoice.serviceOrderId,
+      })),
+      ...paidInvoicesWithoutPayments.map((invoice) => ({
+        amountUsd: Number(invoice.totalUsd),
+        occurredAt: invoice.paidAt || invoice.updatedAt,
+        productOrderId: invoice.productOrderId,
+        serviceOrderId: invoice.serviceOrderId,
+      })),
+    ];
+  }
+
 
   // OVERVIEW DASHBOARD METRICS
 
@@ -58,7 +119,7 @@ export class ReportsService {
     const orderType = query.orderType || 'ALL';
 
     const [
-      allPayments,
+      revenueEntries,
       allRefunds,
       productOrdersCount,
       serviceOrdersCount,
@@ -74,23 +135,7 @@ export class ReportsService {
       awaitingQuoteCount,
       awaitingQuoteLatest,
     ] = await Promise.all([
-      // Completed Payments within the requested window
-      this.prisma.payment.findMany({
-        where: {
-          status: PaymentStatus.SUCCEEDED,
-          processedAt: { gte: from, lte: to },
-          ...(orderType === 'PRODUCT'
-            ? { invoice: { productOrderId: { not: null } } }
-            : orderType === 'SERVICE'
-              ? { invoice: { serviceOrderId: { not: null } } }
-              : {}),
-        },
-        select: {
-          amountUsd: true,
-          processedAt: true,
-          invoice: { select: { productOrderId: true, serviceOrderId: true } },
-        },
-      }),
+      this.getRevenueEntries(from, to, orderType),
       // Refunds - only settled ones. A MANUAL_REQUIRED refund is money that has
       // NOT left the account yet and must not be deducted from revenue.
       this.prisma.refund.findMany({
@@ -168,16 +213,16 @@ export class ReportsService {
       }),
     ]);
 
-    const totalPaymentsUsd = allPayments.reduce((sum, p) => sum + Number(p.amountUsd), 0);
+    const totalPaymentsUsd = revenueEntries.reduce((sum, p) => sum + p.amountUsd, 0);
     const refundAmountUsd = allRefunds.reduce((sum, r) => sum + Number(r.amountUsd), 0);
 
-    const productRevenueUsd = allPayments
-      .filter((p) => p.invoice.productOrderId)
-      .reduce((sum, p) => sum + Number(p.amountUsd), 0);
+    const productRevenueUsd = revenueEntries
+      .filter((p) => p.productOrderId)
+      .reduce((sum, p) => sum + p.amountUsd, 0);
 
-    const serviceRevenueUsd = allPayments
-      .filter((p) => p.invoice.serviceOrderId)
-      .reduce((sum, p) => sum + Number(p.amountUsd), 0);
+    const serviceRevenueUsd = revenueEntries
+      .filter((p) => p.serviceOrderId)
+      .reduce((sum, p) => sum + p.amountUsd, 0);
 
     // Timeseries: Group revenue by day for last 14 days
     const revenueOverTimeMap: Record<string, { product: number; service: number; total: number }> = {};
@@ -187,12 +232,12 @@ export class ReportsService {
       revenueOverTimeMap[key] = { product: 0, service: 0, total: 0 };
     }
 
-    allPayments.forEach((p) => {
-      const key = new Date(p.processedAt).toISOString().split('T')[0];
+    revenueEntries.forEach((p) => {
+      const key = new Date(p.occurredAt).toISOString().split('T')[0];
       if (revenueOverTimeMap[key]) {
-        const amt = Number(p.amountUsd);
-        if (p.invoice.productOrderId) revenueOverTimeMap[key].product += amt;
-        if (p.invoice.serviceOrderId) revenueOverTimeMap[key].service += amt;
+        const amt = p.amountUsd;
+        if (p.productOrderId) revenueOverTimeMap[key].product += amt;
+        if (p.serviceOrderId) revenueOverTimeMap[key].service += amt;
         revenueOverTimeMap[key].total += amt;
       }
     });

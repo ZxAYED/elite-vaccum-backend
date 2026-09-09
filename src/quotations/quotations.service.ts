@@ -93,6 +93,15 @@ export class QuotationsService {
     });
   }
 
+  private async invalidateFinancialCaches() {
+    try {
+      await this.redis.deleteByPattern('reports:*');
+      await this.redis.del('dashboard:admin:v1');
+    } catch (err: any) {
+      this.logger.warn(`Financial cache invalidation error: ${err.message}`);
+    }
+  }
+
   private quotationInclude() {
     return {
       customer: {
@@ -945,7 +954,7 @@ export class QuotationsService {
 
       const invoiceBusinessId = await this.generateInvoiceBusinessId();
 
-      return await this.prisma.$transaction(async (tx) => {
+      const result = await this.prisma.$transaction(async (tx) => {
         // 1. Ensure Quotation is marked ACCEPTED
         await tx.quotation.update({
           where: { id: quotation.id },
@@ -1054,6 +1063,10 @@ export class QuotationsService {
           serviceRequestId: quotation.serviceRequestId,
         };
       });
+
+      await this.invalidateFinancialCaches();
+
+      return result;
     } finally {
       await this.redis.releaseLock(lockKey, lockToken);
     }

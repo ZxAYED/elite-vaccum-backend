@@ -114,6 +114,15 @@ export class BillingService {
     });
   }
 
+  private async invalidateFinancialCaches() {
+    try {
+      await this.redis.deleteByPattern('reports:*');
+      await this.redis.del('dashboard:admin:v1');
+    } catch (err: any) {
+      this.logger.warn(`Financial cache invalidation error: ${err.message}`);
+    }
+  }
+
   private invoiceInclude() {
     return {
       customer: {
@@ -183,6 +192,7 @@ export class BillingService {
     const dueDate = dto.dueDate
       ? new Date(dto.dueDate)
       : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+    const initialStatus = dto.status || InvoiceStatus.ISSUED;
 
     const invoice = await this.prisma.invoice.create({
       data: {
@@ -190,7 +200,8 @@ export class BillingService {
         customerId: dto.customerId,
         serviceOrderId: dto.serviceOrderId || null,
         productOrderId: dto.productOrderId || null,
-        status: dto.status || InvoiceStatus.ISSUED,
+        status: initialStatus,
+        paidAt: initialStatus === InvoiceStatus.PAID ? new Date() : null,
         dueDate,
         subtotalUsd: new Prisma.Decimal(subtotal),
         discountUsd: new Prisma.Decimal(discount),
@@ -230,6 +241,8 @@ export class BillingService {
           this.logger.warn(`Failed to notify customer of invoice: ${err.message}`);
         });
     }
+
+    await this.invalidateFinancialCaches();
 
     return {
       success: true,
@@ -371,7 +384,7 @@ export class BillingService {
       throw new BadRequestException('Cannot edit an already paid invoice');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       let subtotal = Number(existing.subtotalUsd);
       let discount = dto.discountUsd !== undefined ? dto.discountUsd : Number(existing.discountUsd);
       let tax = dto.taxUsd !== undefined ? dto.taxUsd : Number(existing.taxUsd);
@@ -396,6 +409,13 @@ export class BillingService {
       }
 
       const total = Math.max(0, subtotal - discount + tax);
+      const nextStatus = dto.status || existing.status;
+      const nextPaidAt =
+        nextStatus === InvoiceStatus.PAID
+          ? existing.paidAt || new Date()
+          : dto.status
+            ? null
+            : existing.paidAt;
 
       const updated = await tx.invoice.update({
         where: { id },
@@ -404,7 +424,8 @@ export class BillingService {
           discountUsd: new Prisma.Decimal(discount),
           taxUsd: new Prisma.Decimal(tax),
           totalUsd: new Prisma.Decimal(total),
-          status: dto.status || existing.status,
+          status: nextStatus,
+          paidAt: nextPaidAt,
           notes: dto.notes !== undefined ? dto.notes?.trim() || null : existing.notes,
           dueDate: dto.dueDate ? new Date(dto.dueDate) : existing.dueDate,
         },
@@ -417,6 +438,10 @@ export class BillingService {
         invoice: updated,
       };
     });
+
+    await this.invalidateFinancialCaches();
+
+    return result;
   }
 
 
@@ -505,7 +530,7 @@ export class BillingService {
         );
       }
 
-      return await this.prisma.$transaction(async (tx) => {
+      const result = await this.prisma.$transaction(async (tx) => {
         const payment = await tx.payment.create({
           data: {
             invoiceId: id,
@@ -559,6 +584,10 @@ export class BillingService {
           invoice: updatedInvoice,
         };
       });
+
+      await this.invalidateFinancialCaches();
+
+      return result;
     } finally {
       await this.redis.releaseLock(lockKey, lockToken);
     }
@@ -633,7 +662,7 @@ export class BillingService {
 
       const refundedAfter = alreadyRefunded + dto.amountUsd;
 
-      return await this.prisma.$transaction(async (tx) => {
+      const result = await this.prisma.$transaction(async (tx) => {
         const refund = await tx.refund.create({
           data: {
             invoiceId: id,
@@ -697,6 +726,10 @@ export class BillingService {
           invoice: updatedInvoice,
         };
       });
+
+      await this.invalidateFinancialCaches();
+
+      return result;
     } finally {
       await this.redis.releaseLock(lockKey, lockToken);
     }

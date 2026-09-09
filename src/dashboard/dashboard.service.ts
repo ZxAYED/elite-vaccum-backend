@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  InvoiceStatus,
   PaymentStatus,
   ProductOrderStatus,
   ServiceOrderStatus,
@@ -48,6 +49,56 @@ export class DashboardService {
     return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
   }
 
+  private async getRevenueEntries(from: Date, to?: Date) {
+    const dateWhere = to ? { gte: from, lt: to } : { gte: from };
+
+    const [payments, paidInvoicesWithoutPayments] = await Promise.all([
+      this.prisma.payment.findMany({
+        where: {
+          status: PaymentStatus.SUCCEEDED,
+          processedAt: dateWhere,
+        },
+        select: {
+          amountUsd: true,
+          processedAt: true,
+          invoice: { select: { productOrderId: true, serviceOrderId: true } },
+        },
+      }),
+      this.prisma.invoice.findMany({
+        where: {
+          status: InvoiceStatus.PAID,
+          payments: { none: { status: PaymentStatus.SUCCEEDED } },
+          OR: [
+            { paidAt: dateWhere },
+            { paidAt: null, updatedAt: dateWhere },
+          ],
+        },
+        select: {
+          totalUsd: true,
+          paidAt: true,
+          updatedAt: true,
+          productOrderId: true,
+          serviceOrderId: true,
+        },
+      }),
+    ]);
+
+    return [
+      ...payments.map((payment) => ({
+        amountUsd: Number(payment.amountUsd),
+        occurredAt: payment.processedAt,
+        productOrderId: payment.invoice.productOrderId,
+        serviceOrderId: payment.invoice.serviceOrderId,
+      })),
+      ...paidInvoicesWithoutPayments.map((invoice) => ({
+        amountUsd: Number(invoice.totalUsd),
+        occurredAt: invoice.paidAt || invoice.updatedAt,
+        productOrderId: invoice.productOrderId,
+        serviceOrderId: invoice.serviceOrderId,
+      })),
+    ];
+  }
+
   /**
    * Everything the admin dashboard screen renders, in ONE round trip:
    * KPI cards, the six-month revenue trend, the service-distribution donut,
@@ -67,8 +118,9 @@ export class DashboardService {
     const previousFrom = this.monthStart(11);
 
     const [
-      payments,
-      previousPaymentsAgg,
+      revenueEntries,
+      previousRevenueEntries,
+      refunds,
       trackedOrders,
       activeTechnicians,
       offlineTechnicians,
@@ -81,28 +133,16 @@ export class DashboardService {
       awaitingQuoteCount,
       awaitingQuoteLatest,
     ] = await Promise.all([
-      // Settled payments in the current 6-month window, split by domain so the
-      // trend chart can separate product from service revenue.
-      this.prisma.payment.findMany({
+      this.getRevenueEntries(currentFrom),
+
+      this.getRevenueEntries(previousFrom, currentFrom),
+
+      this.prisma.refund.findMany({
         where: {
-          status: PaymentStatus.SUCCEEDED,
+          status: 'COMPLETED',
           processedAt: { gte: currentFrom },
         },
-        select: {
-          amountUsd: true,
-          processedAt: true,
-          invoice: { select: { productOrderId: true, serviceOrderId: true } },
-        },
-      }),
-
-      // Previous 6 months, aggregated in the database - the rows themselves are
-      // never needed, only the sum.
-      this.prisma.payment.aggregate({
-        _sum: { amountUsd: true },
-        where: {
-          status: PaymentStatus.SUCCEEDED,
-          processedAt: { gte: previousFrom, lt: currentFrom },
-        },
+        select: { amountUsd: true },
       }),
 
       this.prisma.productOrder.count({
@@ -187,25 +227,37 @@ export class DashboardService {
     }
 
     let sixMonthRevenue = 0;
-    for (const payment of payments) {
-      const amount = Number(payment.amountUsd);
-      sixMonthRevenue += amount;
+    let productRevenue = 0;
+    let serviceRevenue = 0;
 
-      const bucket = buckets.get(this.monthKey(new Date(payment.processedAt)));
+    for (const payment of revenueEntries) {
+      const amount = payment.amountUsd;
+      sixMonthRevenue += amount;
+      if (payment.productOrderId) productRevenue += amount;
+      if (payment.serviceOrderId) serviceRevenue += amount;
+
+      const bucket = buckets.get(this.monthKey(new Date(payment.occurredAt)));
       if (!bucket) continue;
 
-      if (payment.invoice.productOrderId) bucket.product += amount;
-      if (payment.invoice.serviceOrderId) bucket.service += amount;
+      if (payment.productOrderId) bucket.product += amount;
+      if (payment.serviceOrderId) bucket.service += amount;
       bucket.total += amount;
     }
 
-    const previousRevenue = Number(previousPaymentsAgg._sum.amountUsd || 0);
+    const previousRevenue = previousRevenueEntries.reduce(
+      (sum, payment) => sum + payment.amountUsd,
+      0,
+    );
     const revenueGrowthPercent =
       previousRevenue > 0
         ? Number((((sixMonthRevenue - previousRevenue) / previousRevenue) * 100).toFixed(1))
         : sixMonthRevenue > 0
           ? 100
           : 0;
+    const refundAmount = refunds.reduce(
+      (sum, refund) => sum + Number(refund.amountUsd),
+      0,
+    );
 
     // ── Donut: resolve service names for the grouped ids ──
     const serviceIds = serviceDistribution.map((row) => row.serviceId);
@@ -227,6 +279,10 @@ export class DashboardService {
       data: {
         metrics: {
           sixMonthRevenueUsd: Number(sixMonthRevenue.toFixed(2)),
+          totalRevenue: Number(sixMonthRevenue.toFixed(2)),
+          productRevenue: Number(productRevenue.toFixed(2)),
+          serviceRevenue: Number(serviceRevenue.toFixed(2)),
+          refundAmount: Number(refundAmount.toFixed(2)),
           revenueGrowthPercent,
           trackedOrders,
           scheduledVisits,

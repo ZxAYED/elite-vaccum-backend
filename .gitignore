@@ -12,3 +12,6 @@ yarn-error.log*
 .env
 repomix-output.xml
 package-lock.json
+# never commit any .env variant (backups, per-env copies)
+.env.*
+!.env.example

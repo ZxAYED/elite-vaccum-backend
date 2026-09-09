@@ -83,6 +83,15 @@ export class StoreOrdersService {
     });
   }
 
+  private async invalidateFinancialCaches() {
+    try {
+      await this.redis.deleteByPattern('reports:*');
+      await this.redis.del('dashboard:admin:v1');
+    } catch (err: any) {
+      this.logger.warn(`Financial cache invalidation error: ${err.message}`);
+    }
+  }
+
   private async resolveCustomerId(userId: string): Promise<string> {
     const existing = await this.prisma.customer.findUnique({
       where: { userId },
@@ -111,6 +120,88 @@ export class StoreOrdersService {
       select: { id: true },
     });
     return created.id;
+  }
+
+  /**
+   * Builds the invoice for a product order, freight line included.
+   *
+   * A CARD order is only invoiced once Stripe resolves the payment - PAID on
+   * success, VOID on failure - so the customer is never shown a bill for money
+   * they were never actually charged. A COD order is invoiced at checkout,
+   * because the courier collects against that document on delivery.
+   */
+  private async createInvoiceForOrder(
+    tx: Prisma.TransactionClient,
+    order: {
+      id: string;
+      businessId: string;
+      customerId: string;
+      subtotalUsd: Prisma.Decimal;
+      taxUsd: Prisma.Decimal;
+      discountUsd: Prisma.Decimal;
+      shippingFeeUsd: Prisma.Decimal;
+      totalUsd: Prisma.Decimal;
+      placedAt?: Date;
+      items: {
+        productName: string;
+        productSku: string | null;
+        quantity: number;
+        unitPriceUsd: Prisma.Decimal;
+        totalUsd: Prisma.Decimal;
+      }[];
+    },
+    status: InvoiceStatus,
+    notes: string,
+    paidAt: Date | null = null,
+  ) {
+    const invoiceBusinessId = await this.generateInvoiceBusinessId();
+    const shippingFee = Number(order.shippingFeeUsd);
+    const issuedAt = order.placedAt ?? new Date();
+
+    return tx.invoice.create({
+      data: {
+        businessId: invoiceBusinessId,
+        customerId: order.customerId,
+        productOrderId: order.id,
+        status,
+        paidAt,
+        dueDate: new Date(issuedAt.getTime() + 7 * 24 * 60 * 60 * 1000),
+        subtotalUsd: order.subtotalUsd,
+        taxUsd: order.taxUsd,
+        discountUsd: order.discountUsd,
+        totalUsd: order.totalUsd,
+        notes,
+        lineItems: {
+          create: [
+            ...order.items.map((item, idx) => ({
+              description: `${item.productName} (SKU: ${item.productSku || 'N/A'})`,
+              quantity: item.quantity,
+              unitPriceUsd: item.unitPriceUsd,
+              totalUsd: item.totalUsd,
+              sortOrder: idx + 1,
+            })),
+            // Freight is part of totalUsd, so it has to appear as a line or the
+            // invoice will not foot against its own total.
+            ...(shippingFee > 0
+              ? [
+                  {
+                    description: 'Standard Freight Shipping',
+                    quantity: 1,
+                    unitPriceUsd: new Prisma.Decimal(shippingFee),
+                    totalUsd: new Prisma.Decimal(shippingFee),
+                    sortOrder: order.items.length + 1,
+                  },
+                ]
+              : []),
+          ],
+        },
+      },
+      include: {
+        lineItems: { orderBy: { sortOrder: 'asc' } },
+        payments: { orderBy: { processedAt: 'desc' } },
+        refunds: { orderBy: { processedAt: 'desc' } },
+      },
+    });
   }
 
   private orderInclude() {
@@ -338,7 +429,6 @@ export class StoreOrdersService {
       const total = Number((subtotalNumber + shippingFee + tax - discount).toFixed(2));
 
       const businessId = await this.generateOrderBusinessId();
-      const invoiceBusinessId = await this.generateInvoiceBusinessId();
 
       const paymentMethod = dto.paymentMethod;
       const isCod = paymentMethod === OrderPaymentMethod.COD;
@@ -400,64 +490,32 @@ export class StoreOrdersService {
           include: { items: true, customer: true },
         });
 
-        // Create Invoice for Order
-        const createdInvoice = await tx.invoice.create({
-          data: {
-            businessId: invoiceBusinessId,
-            customerId,
-            productOrderId: createdOrder.id,
-            // A card order is not billed until Stripe confirms payment, so its
-            // invoice stays a DRAFT pro-forma and never shows up as an
-            // outstanding, separately-payable bill. A COD order IS a real bill
-            // the moment it is placed - the courier collects on delivery.
-            status: isCod ? InvoiceStatus.ISSUED : InvoiceStatus.DRAFT,
-            notes: isCod
-              ? 'Payment method: Cash on Delivery (COD). Payable to the courier on delivery.'
-              : 'Payment method: Online card payment via Stripe Checkout.',
-            dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-            subtotalUsd: subtotal,
-            taxUsd: new Prisma.Decimal(tax),
-            discountUsd: new Prisma.Decimal(discount),
-            totalUsd: new Prisma.Decimal(total),
-            lineItems: {
-              create: [
-                ...cart.items.map((item: any, idx: number) => ({
-                  description: `${item.product.name} (SKU: ${item.product.sku || 'N/A'})`,
-                  quantity: item.quantity,
-                  unitPriceUsd: item.product.priceUsd,
-                  totalUsd: item.product.priceUsd.mul(item.quantity),
-                  sortOrder: idx + 1,
-                })),
-                ...(shippingFee > 0
-                  ? [
-                      {
-                        description: 'Standard Freight Shipping',
-                        quantity: 1,
-                        unitPriceUsd: new Prisma.Decimal(shippingFee),
-                        totalUsd: new Prisma.Decimal(shippingFee),
-                        sortOrder: cart.items.length + 1,
-                      },
-                    ]
-                  : []),
-              ],
-            },
-          },
-        });
+        // A COD order is a real bill the moment it is placed - the courier
+        // collects against it - so it is invoiced here, with a pending payment
+        // that settles on delivery.
+        //
+        // A CARD order is NOT invoiced yet. Its invoice is created by the Stripe
+        // webhook once the payment actually resolves (PAID on success, VOID on
+        // failure), so no bill exists for money the customer was never charged.
+        if (isCod) {
+          const createdInvoice = await this.createInvoiceForOrder(
+            tx,
+            createdOrder,
+            InvoiceStatus.ISSUED,
+            'Payment method: Cash on Delivery (COD). Payable to the courier on delivery.',
+          );
 
-        // Record the pending payment for BOTH methods so every order carries a
-        // queryable payment status from the moment it is placed.
-        await tx.payment.create({
-          data: {
-            invoiceId: createdInvoice.id,
-            customerId,
-            amountUsd: new Prisma.Decimal(total),
-            status: PaymentStatus.PENDING,
-            methodLabel: isCod ? 'Cash on Delivery' : 'Stripe Credit Card',
-            transactionReference: isCod
-              ? `COD-${businessId}`
-              : `STRIPE-PENDING-${businessId}`,
-          },
-        });
+          await tx.payment.create({
+            data: {
+              invoiceId: createdInvoice.id,
+              customerId,
+              amountUsd: new Prisma.Decimal(total),
+              status: PaymentStatus.PENDING,
+              methodLabel: 'Cash on Delivery',
+              transactionReference: `COD-${businessId}`,
+            },
+          });
+        }
 
         // Clear Customer Cart
         await tx.cartItem.deleteMany({
@@ -802,6 +860,7 @@ export class StoreOrdersService {
       // sessions after 24h). The order can never be paid from this session.
       case 'checkout.session.expired':
       // A delayed payment method (e.g. bank debit) was ultimately declined.
+        // falls through
       case 'checkout.session.async_payment_failed': {
         const session = event.data.object as Stripe.Checkout.Session;
         const orderId =
@@ -887,7 +946,7 @@ export class StoreOrdersService {
     try {
       const order = await this.prisma.productOrder.findUnique({
         where: { id: orderId },
-        include: { invoices: true },
+        include: { invoices: true, items: true },
       });
 
       if (!order) {
@@ -929,46 +988,57 @@ export class StoreOrdersService {
           },
         });
 
-        // 3. Update Invoice & Record Payment
-        const invoice = order.invoices[0];
-        if (invoice) {
+        // 3. Invoice the order. A card order has none until now - this webhook
+        // is what turns a paid order into a bill - so create it as PAID. A COD
+        // order already has an ISSUED invoice, so that one is settled instead.
+        const paidAt = new Date();
+        const invoice =
+          order.invoices[0] ??
+          (await this.createInvoiceForOrder(
+            tx,
+            order,
+            InvoiceStatus.PAID,
+            'Payment method: Online card payment via Stripe Checkout.',
+            paidAt,
+          ));
+
+        if (order.invoices[0]) {
           await tx.invoice.update({
             where: { id: invoice.id },
+            data: { status: InvoiceStatus.PAID, paidAt },
+          });
+        }
+
+        // 4. Record the payment. Promote the PENDING row if one exists (COD)
+        // rather than inserting a second payment against the same invoice.
+        const pendingPayment = await tx.payment.findFirst({
+          where: { invoiceId: invoice.id, status: PaymentStatus.PENDING },
+        });
+
+        const paymentData = {
+          amountUsd: new Prisma.Decimal(amountUsd || Number(order.totalUsd)),
+          status: PaymentStatus.SUCCEEDED,
+          methodLabel: 'Stripe Credit Card',
+          transactionReference,
+        };
+
+        if (pendingPayment) {
+          await tx.payment.update({
+            where: { id: pendingPayment.id },
+            data: paymentData,
+          });
+        } else {
+          await tx.payment.create({
             data: {
-              status: InvoiceStatus.PAID,
-              paidAt: new Date(),
+              invoiceId: invoice.id,
+              customerId: order.customerId,
+              ...paymentData,
             },
           });
-
-          // Promote the PENDING row written at checkout rather than inserting a
-          // second payment against the same invoice.
-          const pendingPayment = await tx.payment.findFirst({
-            where: { invoiceId: invoice.id, status: PaymentStatus.PENDING },
-          });
-
-          const paymentData = {
-            amountUsd: new Prisma.Decimal(amountUsd || Number(order.totalUsd)),
-            status: PaymentStatus.SUCCEEDED,
-            methodLabel: 'Stripe Credit Card',
-            transactionReference,
-          };
-
-          if (pendingPayment) {
-            await tx.payment.update({
-              where: { id: pendingPayment.id },
-              data: paymentData,
-            });
-          } else {
-            await tx.payment.create({
-              data: {
-                invoiceId: invoice.id,
-                customerId: order.customerId,
-                ...paymentData,
-              },
-            });
-          }
         }
       });
+
+      await this.invalidateFinancialCaches();
 
       // Notify Customer
       const fullOrder = await this.prisma.productOrder.findUnique({
@@ -1079,10 +1149,21 @@ export class StoreOrdersService {
           },
         });
 
-        const invoice = order.invoices[0];
-        if (invoice) {
-          // 4. Void the unpaid invoice
-          if (invoice.status !== InvoiceStatus.PAID) {
+        // 4. Invoice the failed attempt. A card order has no invoice until a
+        // payment resolves, so record a VOID one: it documents that a charge
+        // was attempted and did not succeed. A COD order already has an ISSUED
+        // invoice, which gets voided instead.
+        const invoice =
+          order.invoices[0] ??
+          (await this.createInvoiceForOrder(
+            tx,
+            order,
+            InvoiceStatus.VOID,
+            `Payment method: Online card payment via Stripe Checkout. Voided - payment failed: ${reason}`,
+          ));
+
+        {
+          if (order.invoices[0] && invoice.status !== InvoiceStatus.PAID) {
             await tx.invoice.update({
               where: { id: invoice.id },
               data: { status: InvoiceStatus.VOID },
@@ -1279,8 +1360,16 @@ export class StoreOrdersService {
       }
     }
 
+    // Backfill for legacy orders placed before invoicing existed. A PENDING or
+    // FAILED card order is deliberately invoice-less until Stripe resolves the
+    // payment, so it must NOT be given one here - that would recreate the very
+    // "bill for money never charged" this flow removes.
     let invoices = order.invoices;
-    if (!invoices || invoices.length === 0) {
+    const awaitingPaymentResolution =
+      order.status === ProductOrderStatus.PENDING ||
+      order.status === ProductOrderStatus.FAILED;
+
+    if ((!invoices || invoices.length === 0) && !awaitingPaymentResolution) {
       try {
         const businessId = await this.generateInvoiceBusinessId();
         const dueDate = new Date(order.placedAt.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -1526,7 +1615,7 @@ export class StoreOrdersService {
 
     const newStatus = dto.status || order.status;
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.productOrder.update({
         where: { id: order.id },
         data: {
@@ -1648,5 +1737,9 @@ export class StoreOrdersService {
 
       return updated;
     });
+
+    await this.invalidateFinancialCaches();
+
+    return result;
   }
 }

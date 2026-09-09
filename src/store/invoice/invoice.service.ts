@@ -7,6 +7,7 @@ import {
 import {
   InvoiceStatus,
   Prisma,
+  ProductOrderStatus,
   UserRole,
 } from '@prisma/client';
 import { RequestUser } from 'src/common/decorator/currentUser.decorator';
@@ -97,6 +98,19 @@ export class StoreInvoiceService {
     }
 
     let invoice = order.invoices[0];
+
+    // A card order is deliberately invoice-less until Stripe resolves the
+    // payment. Generating a PDF must not conjure one into existence, or the
+    // customer ends up holding an invoice for money never charged.
+    if (
+      !invoice &&
+      (order.status === ProductOrderStatus.PENDING ||
+        order.status === ProductOrderStatus.FAILED)
+    ) {
+      throw new BadRequestException(
+        `Order '${order.businessId}' has no invoice yet because its payment has not completed. An invoice is issued once payment succeeds.`,
+      );
+    }
 
     if (!invoice) {
       const businessId = await generateBusinessId('INV', async (id) => {

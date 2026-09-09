@@ -41,6 +41,15 @@ export class StoreReturnsService {
     );
   }
 
+  private async invalidateFinancialCaches() {
+    try {
+      await this.redis.deleteByPattern('reports:*');
+      await this.redis.del('dashboard:admin:v1');
+    } catch (err: any) {
+      this.logger.warn(`Financial cache invalidation error: ${err.message}`);
+    }
+  }
+
   /**
    * Submit return request for a delivered order.
    */
@@ -272,7 +281,7 @@ export class StoreReturnsService {
           : stripeRefund.status.toUpperCase();
 
       try {
-        return await this.prisma.$transaction(async (tx) => {
+        const result = await this.prisma.$transaction(async (tx) => {
           // 1. Restore returned products inventory back to stock
           for (const item of order.items) {
             if (item.productId) {
@@ -353,6 +362,10 @@ export class StoreReturnsService {
             },
           };
         });
+
+        await this.invalidateFinancialCaches();
+
+        return result;
       } catch (dbErr: any) {
         if (stripeRefund) {
           this.logger.error(

@@ -1,41 +1,10 @@
-# Local development stack: Postgres + Redis + the API.
-# Replaces the old split between compose.yaml and docker-compose.yml.
+# Local dev stack: just the API, pointed at the same cloud services used in
+# production (Neon Postgres + Upstash Redis via DATABASE_URL / REDIS_URL in
+# .env). There is no local postgres/redis container to run or keep in sync —
+# `docker compose up` here talks to the same database and cache as Render.
 name: aryegrunzwieg
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: aryegrunzwieg-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-aryegrunzwieg}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-
-  redis:
-    image: redis:7-alpine
-    container_name: aryegrunzwieg-redis
-    restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-
   app:
     build:
       context: .
@@ -49,19 +18,6 @@ services:
     environment:
       NODE_ENV: production
       PORT: "3000"
-      # Container-network hostnames override whatever .env points at.
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-aryegrunzwieg}
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
       RUN_MIGRATIONS: "true"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     ports:
       - "3000:3000"
-
-volumes:
-  postgres_data:
-  redis_data:
