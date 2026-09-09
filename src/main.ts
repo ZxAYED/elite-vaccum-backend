@@ -52,31 +52,25 @@ async function bootstrap() {
   );
   app.use(express.urlencoded({ extended: true, limit: '1000mb' }));
 
-  // Strict CORS Configuration (prevents wildcard origin credential leaks)
-  const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
-    .split(',')
-    .map((o) => o.trim())
-    .filter(Boolean);
-
-  if (process.env.FRONTEND_URL) {
-    allowedOrigins.push(process.env.FRONTEND_URL.trim());
-  }
-
-  const devOrigins = [
+  // CORS: known frontend origins (local dev + deployed) are always trusted,
+  // in every environment. Simple on purpose - this is a resume/demo project,
+  // not a multi-tenant API guarding real user data behind a strict origin gate.
+  const allowedOrigins = [
     'http://localhost:3000',
-      'http://localhost:3001',
-    'https://elite-vaccum-frontend.vercel.app',
+    'http://localhost:3001',
     'http://localhost:5173',
-
+    'https://elite-vaccum-frontend.vercel.app',
+    ...(process.env.ALLOWED_ORIGINS || '')
+      .split(',')
+      .map((o) => o.trim())
+      .filter(Boolean),
+    ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL.trim()] : []),
   ];
 
   app.enableCors({
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
-      const isAllowed =
-        allowedOrigins.includes(origin) ||
-        (process.env.NODE_ENV !== 'production' &&
-          devOrigins.some((dev) => origin.startsWith(dev)));
+      const isAllowed = allowedOrigins.some((allowed) => origin.startsWith(allowed));
       if (isAllowed) {
         callback(null, true);
       } else {
