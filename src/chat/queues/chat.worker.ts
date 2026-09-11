@@ -88,6 +88,14 @@ export class ChatWorker implements OnModuleInit, OnModuleDestroy {
     );
 
     for (const recipient of recipients) {
+      // Disabled for now: do not send offline email alerts to admin users
+      if (recipient.user?.role === 'ADMIN') {
+        this.logger.debug(
+          `Skipping offline chat email alert for ADMIN user: ${recipient.user?.email}`,
+        );
+        continue;
+      }
+
       // Check if recipient is online in Redis
       const isOnline = await this.presenceService.isUserOnline(recipient.userId);
 

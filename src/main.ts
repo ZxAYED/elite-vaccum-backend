@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import express from 'express';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { corsOriginCheck } from './common/utils/allowed-origins';
 import { ResponseEnvelopeInterceptor } from './common/interceptors/response-envelope.interceptor';
 import { setupSwagger } from './swagger';
 
@@ -55,28 +56,10 @@ async function bootstrap() {
   // CORS: known frontend origins (local dev + deployed) are always trusted,
   // in every environment. Simple on purpose - this is a resume/demo project,
   // not a multi-tenant API guarding real user data behind a strict origin gate.
-  const allowedOrigins = [
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'http://localhost:5173',
-    'https://elite-vaccum-frontend.vercel.app',
-    ...(process.env.ALLOWED_ORIGINS || '')
-      .split(',')
-      .map((o) => o.trim())
-      .filter(Boolean),
-    ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL.trim()] : []),
-  ];
-
+  // Shared with every Socket.IO gateway via corsOriginCheck() so WebSocket
+  // handshakes enforce the same allowlist instead of a wildcard origin.
   app.enableCors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      const isAllowed = allowedOrigins.some((allowed) => origin.startsWith(allowed));
-      if (isAllowed) {
-        callback(null, true);
-      } else {
-        callback(new Error(`CORS origin '${origin}' not allowed by policy`));
-      }
-    },
+    origin: corsOriginCheck,
     credentials: true,
   });
 

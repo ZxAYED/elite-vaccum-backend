@@ -136,11 +136,23 @@ export class AuthController {
     // Auto-save refresh token in secure HttpOnly cookie
     res.cookie(REFRESH_COOKIE_NAME, result.refreshToken, getRefreshCookieOptions());
 
-    // Send only user and accessToken in JSON response
-    return {
-      user: result.user,
+    const responsePayload: Record<string, any> = {
+      user: result.technicianProfile
+        ? {
+            ...result.user,
+            technicianProfile: result.technicianProfile,
+            profile: result.technicianProfile,
+          }
+        : result.user,
       accessToken: result.accessToken,
     };
+
+    if (result.technicianProfile) {
+      responsePayload.technicianProfile = result.technicianProfile;
+      responsePayload.profile = result.technicianProfile;
+    }
+
+    return responsePayload;
   }
 
   @Public()
@@ -213,10 +225,23 @@ export class AuthController {
     // Rotate/refresh cookie
     res.cookie(REFRESH_COOKIE_NAME, result.refreshToken, getRefreshCookieOptions());
 
-    return {
-      user: result.user,
+    const responsePayload: Record<string, any> = {
+      user: result.technicianProfile
+        ? {
+            ...result.user,
+            technicianProfile: result.technicianProfile,
+            profile: result.technicianProfile,
+          }
+        : result.user,
       accessToken: result.accessToken,
     };
+
+    if (result.technicianProfile) {
+      responsePayload.technicianProfile = result.technicianProfile;
+      responsePayload.profile = result.technicianProfile;
+    }
+
+    return responsePayload;
   }
 
   @Public()

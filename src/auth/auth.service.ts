@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { CustomerStatus, OtpPurpose, UserRole } from '@prisma/client';
+import { CustomerStatus, OtpPurpose, TechnicianStatus, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import type { StringValue } from 'ms';
@@ -82,6 +82,32 @@ export class AuthService {
       emailVerifiedAt: user.emailVerifiedAt,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
+    };
+  }
+
+  async getTechnicianProfile(userId: string) {
+    const tech = await this.prisma.technician.findUnique({
+      where: { userId },
+    });
+    if (!tech) return null;
+    return {
+      id: tech.id,
+      userId: tech.userId,
+      displayName: tech.displayName,
+      email: tech.email,
+      phone: tech.phone,
+      status: tech.status,
+      rating: Number(tech.rating),
+      completedJobs: tech.completedJobs,
+      isVerified: tech.isVerified,
+      specializations: tech.specializations || [],
+      availability: tech.availability,
+      avatarUrl: tech.avatarUrl,
+      timezone: tech.timezone,
+      adminNotes: tech.adminNotes,
+      defaultAvailability: tech.defaultAvailability,
+      createdAt: tech.createdAt,
+      updatedAt: tech.updatedAt,
     };
   }
 
@@ -495,10 +521,52 @@ export class AuthService {
       },
     });
 
+    let technicianProfile: Record<string, any> | null = null;
+    if (user.role === UserRole.TECHNICIAN) {
+      technicianProfile = await this.getTechnicianProfile(user.id);
+      if (!technicianProfile) {
+        const created = await this.prisma.technician.create({
+          data: {
+            userId: user.id,
+            displayName: `${user.firstName} ${user.lastName}`.trim() || user.email,
+            email: user.email,
+            phone: user.phone || '',
+            status: TechnicianStatus.ACTIVE,
+            rating: 5.0,
+            completedJobs: 0,
+            isVerified: true,
+            availability: 'AVAILABLE',
+            specializations: [],
+            timezone: 'America/New_York',
+          },
+        });
+        technicianProfile = {
+          id: created.id,
+          userId: created.userId,
+          displayName: created.displayName,
+          email: created.email,
+          phone: created.phone,
+          status: created.status,
+          rating: Number(created.rating),
+          completedJobs: created.completedJobs,
+          isVerified: created.isVerified,
+          specializations: created.specializations || [],
+          availability: created.availability,
+          avatarUrl: created.avatarUrl,
+          timezone: created.timezone,
+          adminNotes: created.adminNotes,
+          defaultAvailability: created.defaultAvailability,
+          createdAt: created.createdAt,
+          updatedAt: created.updatedAt,
+        };
+      }
+    }
+
     return {
       user: this.toPublicUser(user),
       accessToken,
       refreshToken,
+      technicianProfile,
     };
   }
 
@@ -673,10 +741,16 @@ export class AuthService {
       });
     });
 
+    let technicianProfile: Record<string, any> | null = null;
+    if (user.role === UserRole.TECHNICIAN) {
+      technicianProfile = await this.getTechnicianProfile(user.id);
+    }
+
     return {
       user: this.toPublicUser(user),
       accessToken: newAccessToken,
       refreshToken: newRefreshToken,
+      technicianProfile,
     };
   }
 
@@ -719,6 +793,16 @@ export class AuthService {
 
     this.assertUserCanAuthenticate(user);
 
-    return this.toPublicUser(user);
+    const publicUser = this.toPublicUser(user);
+    if (user.role === UserRole.TECHNICIAN) {
+      const technicianProfile = await this.getTechnicianProfile(user.id);
+      return {
+        ...publicUser,
+        technicianProfile,
+        profile: technicianProfile,
+      };
+    }
+
+    return publicUser;
   }
 }

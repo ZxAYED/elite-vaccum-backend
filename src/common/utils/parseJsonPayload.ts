@@ -39,6 +39,9 @@ export function extractMultipartJsonPayload<T = Record<string, any>>(
     } catch {
       // Return as is if parsing fails
     }
+  } else if (typeof body.data === 'object' && body.data !== null) {
+    const { data: parsed, ...rest } = body;
+    return { ...parsed, ...rest } as T;
   }
   return body as T;
 }

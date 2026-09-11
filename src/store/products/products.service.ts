@@ -8,6 +8,7 @@ import {
   Prisma,
   ProductAvailability,
   ProductStatus,
+  ReviewStatus,
   UserRole,
 } from '@prisma/client';
 import * as crypto from 'crypto';
@@ -23,6 +24,15 @@ import { UpdateProductDto } from '../dto/update-product.dto';
 import { UpdateProductStatusDto } from '../dto/update-product-status.dto';
 import { UpdateProductStockDto } from '../dto/update-product-stock.dto';
 import { UploadProductImagesDto } from '../dto/upload-product-images.dto';
+
+const DEFAULT_EMBEDDED_REVIEWS = 20;
+const MAX_EMBEDDED_REVIEWS = 100;
+
+export interface ProductReviewSummary {
+  averageRating: number;
+  totalReviews: number;
+  distribution: Record<number, number>;
+}
 
 @Injectable()
 export class StoreProductsService {
@@ -68,6 +78,95 @@ export class StoreProductsService {
         },
       },
     } satisfies Prisma.ProductInclude;
+  }
+
+
+  // PRODUCT REVIEW AGGREGATION
+
+
+  /**
+   * Compact public projection for a review rendered inside a product payload.
+   * Deliberately omits the nested product relation, which would be redundant here.
+   */
+  private publicReviewSelect() {
+    return {
+      id: true,
+      rating: true,
+      title: true,
+      body: true,
+      preview: true,
+      customerName: true,
+      submittedAt: true,
+      publishedAt: true,
+      customer: {
+        select: { id: true, displayName: true },
+      },
+    } satisfies Prisma.CustomerReviewSelect;
+  }
+
+  private emptyReviewSummary(): ProductReviewSummary {
+    return {
+      averageRating: 0,
+      totalReviews: 0,
+      distribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+    };
+  }
+
+  /**
+   * Aggregates PUBLISHED review stats for many products in one grouped query, so list
+   * endpoints stay at a constant number of round trips regardless of page size.
+   */
+  private async getReviewSummaries(
+    productIds: string[],
+  ): Promise<Map<string, ProductReviewSummary>> {
+    const summaries = new Map<string, ProductReviewSummary>();
+    if (productIds.length === 0) {
+      return summaries;
+    }
+
+    for (const id of productIds) {
+      summaries.set(id, this.emptyReviewSummary());
+    }
+
+    try {
+      const grouped = await this.prisma.customerReview.groupBy({
+        by: ['productId', 'rating'],
+        where: {
+          productId: { in: productIds },
+          status: ReviewStatus.PUBLISHED,
+        },
+        _count: { _all: true },
+      });
+
+      const ratingSums = new Map<string, number>();
+
+      for (const row of grouped) {
+        if (!row.productId) continue;
+        const summary = summaries.get(row.productId);
+        if (!summary) continue;
+
+        const count = row._count._all;
+        summary.distribution[row.rating] =
+          (summary.distribution[row.rating] || 0) + count;
+        summary.totalReviews += count;
+        ratingSums.set(
+          row.productId,
+          (ratingSums.get(row.productId) || 0) + row.rating * count,
+        );
+      }
+
+      for (const [productId, summary] of summaries) {
+        if (summary.totalReviews > 0) {
+          summary.averageRating = Number(
+            ((ratingSums.get(productId) || 0) / summary.totalReviews).toFixed(1),
+          );
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(`Review summary aggregation failed: ${err.message}`);
+    }
+
+    return summaries;
   }
 
   private resolveSynchronizedAvailability(
@@ -474,8 +573,16 @@ export class StoreProductsService {
       include: this.productInclude(),
     });
 
+    // Attach published-review stats (average rating + counts) for catalog cards
+    const reviewSummaries = await this.getReviewSummaries(
+      items.map((item) => item.id),
+    );
+
     const result = {
-      items,
+      items: items.map((item) => ({
+        ...item,
+        reviews: reviewSummaries.get(item.id) ?? this.emptyReviewSummary(),
+      })),
       meta,
     };
 
@@ -496,10 +603,18 @@ export class StoreProductsService {
     );
   }
 
-  async getProductById(idOrSku: string, user?: RequestUser | null) {
+  async getProductById(
+    idOrSku: string,
+    user?: RequestUser | null,
+    reviewsLimit?: number,
+  ) {
     const admin = this.isAdmin(user);
+    const embeddedReviewsLimit = Math.min(
+      Math.max(Number(reviewsLimit) || DEFAULT_EMBEDDED_REVIEWS, 1),
+      MAX_EMBEDDED_REVIEWS,
+    );
     const cacheKey = !admin
-      ? `store:products:detail:${idOrSku.toLowerCase().trim()}`
+      ? `store:products:detail:${idOrSku.toLowerCase().trim()}:r${embeddedReviewsLimit}`
       : null;
 
     if (cacheKey) {
@@ -530,11 +645,85 @@ export class StoreProductsService {
       }
     }
 
-    if (cacheKey && product) {
-      await this.redis.set(cacheKey, product, 600); // 10 minutes TTL
+    // Published reviews for this product: summary stats + first page of full reviews
+    const [summaries, reviewItems] = await Promise.all([
+      this.getReviewSummaries([product.id]),
+      this.prisma.customerReview.findMany({
+        where: { productId: product.id, status: ReviewStatus.PUBLISHED },
+        select: this.publicReviewSelect(),
+        orderBy: { submittedAt: 'desc' },
+        take: embeddedReviewsLimit,
+      }),
+    ]);
+
+    const summary = summaries.get(product.id) ?? this.emptyReviewSummary();
+    const payload = {
+      ...product,
+      reviews: {
+        ...summary,
+        items: reviewItems,
+        hasMore: summary.totalReviews > reviewItems.length,
+      },
+    };
+
+    if (cacheKey) {
+      await this.redis.set(cacheKey, payload, 600); // 10 minutes TTL
     }
 
-    return product;
+    return payload;
+  }
+
+  /**
+   * Paginated PUBLISHED reviews for a single product, resolved by UUID or SKU.
+   * Backs the "load more reviews" control on the product details page.
+   */
+  async getProductReviews(
+    idOrSku: string,
+    query: { page?: number; limit?: number; rating?: number },
+  ) {
+    const isUuid = this.isUuid(idOrSku);
+    const product = await this.prisma.product.findFirst({
+      where: isUuid ? { id: idOrSku } : { sku: idOrSku },
+      select: { id: true, name: true, sku: true },
+    });
+
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+
+    const where: Prisma.CustomerReviewWhereInput = {
+      productId: product.id,
+      status: ReviewStatus.PUBLISHED,
+      ...(query.rating ? { rating: Number(query.rating) } : {}),
+    };
+
+    const totalItems = await this.prisma.customerReview.count({ where });
+    const { skip, take, meta } = getPagination(
+      query.page,
+      query.limit,
+      totalItems,
+    );
+
+    const [items, summaries] = await Promise.all([
+      this.prisma.customerReview.findMany({
+        where,
+        skip,
+        take,
+        select: this.publicReviewSelect(),
+        orderBy: { submittedAt: 'desc' },
+      }),
+      this.getReviewSummaries([product.id]),
+    ]);
+
+    return {
+      product,
+      items,
+      meta: {
+        ...meta,
+        // Summary always reflects ALL published reviews, ignoring the rating filter
+        summary: summaries.get(product.id) ?? this.emptyReviewSummary(),
+      },
+    };
   }
 
   async updateProduct(
@@ -1107,15 +1296,15 @@ export class StoreProductsService {
    */
   async invalidateProductCache(productId?: string | null, sku?: string | null) {
     try {
-      const keysToDelete: string[] = [];
       if (productId) {
-        keysToDelete.push(`store:products:detail:${productId.toLowerCase()}`);
+        await this.redis.deleteByPattern(
+          `store:products:detail:${productId.toLowerCase()}*`,
+        );
       }
       if (sku) {
-        keysToDelete.push(`store:products:detail:${sku.toLowerCase()}`);
-      }
-      if (keysToDelete.length > 0) {
-        await this.redis.del(...keysToDelete);
+        await this.redis.deleteByPattern(
+          `store:products:detail:${sku.toLowerCase()}*`,
+        );
       }
       await this.redis.deleteByPattern('store:products:list:*');
       await this.redis.deleteByPattern('store:categories:*');

@@ -20,6 +20,7 @@ import {
   ApiBody,
   ApiConsumes,
   ApiOperation,
+  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -187,13 +188,52 @@ export class StoreProductsController {
     return this.reviewsService.getMyProductReview(id, user);
   }
 
+  @Get(':id/reviews')
+  @Public()
+  @ApiOperation({
+    summary:
+      'Paginated published reviews for a product (by UUID or SKU) with rating summary',
+  })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 10 })
+  @ApiQuery({
+    name: 'rating',
+    required: false,
+    example: 5,
+    description: 'Filter by star rating (1-5)',
+  })
+  @ApiResponse({ status: 200, description: 'Product reviews returned' })
+  @ApiResponse({ status: 404, description: 'Product not found' })
+  getProductReviews(
+    @Param('id') id: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('rating') rating?: number,
+  ) {
+    return this.productsService.getProductReviews(id, { page, limit, rating });
+  }
+
   @Get(':id')
   @Public()
-  @ApiOperation({ summary: 'Get product details by UUID or unique SKU' })
+  @ApiOperation({
+    summary:
+      'Get product details by UUID or unique SKU (includes review summary + reviews)',
+  })
+  @ApiQuery({
+    name: 'reviewsLimit',
+    required: false,
+    example: 20,
+    description:
+      'How many published reviews to embed in the details payload (1-100, default 20). Use GET /products/:id/reviews to page beyond this.',
+  })
   @ApiResponse({ status: 200, description: 'Product details returned' })
   @ApiResponse({ status: 404, description: 'Product not found' })
-  getProductById(@Param('id') id: string, @CurrentUser() user?: RequestUser) {
-    return this.productsService.getProductById(id, user);
+  getProductById(
+    @Param('id') id: string,
+    @Query('reviewsLimit') reviewsLimit?: number,
+    @CurrentUser() user?: RequestUser,
+  ) {
+    return this.productsService.getProductById(id, user, reviewsLimit);
   }
 
   @Patch(':id')

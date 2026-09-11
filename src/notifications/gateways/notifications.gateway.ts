@@ -11,6 +11,7 @@ import {
 } from '@nestjs/websockets';
 import { UserRole } from '@prisma/client';
 import { Server, Socket } from 'socket.io';
+import { corsOriginCheck } from 'src/common/utils/allowed-origins';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { REDIS_CHANNELS } from 'src/redis/constants/redis.constants';
 import { RedisPresenceService } from 'src/redis/redis-presence.service';
@@ -35,7 +36,7 @@ export interface NotificationPubSubPayload {
 @WebSocketGateway({
   namespace: '/notifications',
   cors: {
-    origin: '*',
+    origin: corsOriginCheck,
     credentials: true,
   },
 })

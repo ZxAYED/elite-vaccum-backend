@@ -90,6 +90,35 @@ export class AllExceptionsFilter implements ExceptionFilter {
       return;
     }
 
+    // Handle class-validator ValidationError array (e.g. from validateOrReject)
+    if (
+      (Array.isArray(exception) && exception.length > 0 && (exception[0]?.constraints || exception[0]?.property)) ||
+      (typeof exception === 'object' && exception !== null && ('constraints' in exception || 'property' in exception))
+    ) {
+      const errList = Array.isArray(exception) ? exception : [exception];
+      const messages: string[] = [];
+      for (const err of errList) {
+        if (err.constraints) {
+          messages.push(...Object.values(err.constraints as Record<string, string>));
+        } else if (err.message) {
+          messages.push(String(err.message));
+        }
+      }
+      httpAdapter.reply(
+        ctx.getResponse(),
+        {
+          success: false,
+          statusCode: HttpStatus.BAD_REQUEST,
+          code: 'VALIDATION_ERROR',
+          timestamp,
+          path,
+          message: messages.length > 0 ? (messages.length === 1 ? messages[0] : messages) : 'Validation failed',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+      return;
+    }
+
     if (exception instanceof Prisma.PrismaClientKnownRequestError) {
       const mapped = mapPrismaKnownError(exception);
 
