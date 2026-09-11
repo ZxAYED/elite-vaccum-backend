@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -12,7 +13,7 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FilesInterceptor } from '@nestjs/platform-express';
+import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -22,7 +23,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { plainToInstance } from 'class-transformer';
-import { validateOrReject } from 'class-validator';
+import { validate } from 'class-validator';
 import { CurrentUser, RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { AuthGuard } from 'src/common/guards/auth/auth.guard';
 import { extractMultipartJsonPayload } from 'src/common/utils/parseJsonPayload';
@@ -107,7 +108,7 @@ export class ChatController {
 
   @Post('conversations/:id/messages')
   @HttpCode(HttpStatus.CREATED)
-  @UseInterceptors(FilesInterceptor('attachments', 5))
+  @UseInterceptors(AnyFilesInterceptor())
   @ApiConsumes('multipart/form-data', 'application/json')
   @ApiOperation({
     summary: 'Send a message (REST fallback with Cloudinary photo/file uploads)',
@@ -140,10 +141,18 @@ export class ChatController {
   ) {
     const payload = extractMultipartJsonPayload<SendChatMessageDto>(rawBody);
     const dto = plainToInstance(SendChatMessageDto, payload);
-    await validateOrReject(dto, {
+    const validationErrors = await validate(dto, {
       whitelist: true,
       forbidNonWhitelisted: false,
     });
+    if (validationErrors.length > 0) {
+      const messages = validationErrors
+        .map((err) => Object.values(err.constraints || {}).join(', '))
+        .filter(Boolean);
+      throw new BadRequestException(
+        messages.length > 0 ? messages.join('; ') : 'Validation failed',
+      );
+    }
     return this.chatService.sendMessage(id, user, dto, files);
   }
 

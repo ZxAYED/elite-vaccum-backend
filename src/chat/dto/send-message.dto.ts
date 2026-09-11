@@ -34,13 +34,13 @@ export class MessageAttachmentInputDto {
 }
 
 export class SendChatMessageDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'Can a technician check the second floor low-voltage wire?',
-    description: 'Message text content',
+    description: 'Message text content (optional if files or attachments are provided)',
   })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  readonly content!: string;
+  readonly content?: string;
 
   @ApiPropertyOptional({
     enum: ChatMessageType,

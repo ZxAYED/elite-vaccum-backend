@@ -46,6 +46,16 @@ export class AuthTokensResponseDto {
   accessToken!: string;
 
   @ApiPropertyOptional({
+    description: 'Technician profile details (present when authenticated user role is TECHNICIAN)',
+  })
+  technicianProfile?: Record<string, any>;
+
+  @ApiPropertyOptional({
+    description: 'Alias for technicianProfile',
+  })
+  profile?: Record<string, any>;
+
+  @ApiPropertyOptional({
     description: 'Auto-saved in secure HttpOnly cookie (cookie name: refreshToken)',
     example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
   })

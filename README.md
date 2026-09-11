@@ -211,7 +211,7 @@
 
 ### 🤖 9. Google Gemini AI Diagnostics & Streaming Assistant (`src/ai`)
 
-- **Real-Time Streaming SSE Chat**: Server-Sent Events streaming chat endpoint (`POST /ai/chat/stream`) powered by Google Gemini 1.5 Flash.
+- **Real-Time Streaming SSE Chat**: Server-Sent Events streaming chat endpoint (`POST /ai/chat/stream`) powered by Google Gemini 3.8 Flash.
 - **Structured Symptom Extraction**: Natural language intake analysis extracting symptoms (`LOW_SUCTION`, `CLOG`, `ODOR`, etc.), urgency scores, and recommended actions using structured output schemas.
 - **Live Database Tool Calling**: Gemini integrates directly with real-time Prisma DB queries to check active service catalog items, product inventory, and customer equipment history.
 - **Intelligent CTAs**: Dynamically provides actionable deep links to book matching service appointments or purchase replacement filters/accessories.
@@ -387,7 +387,7 @@ The backend utilizes **Upstash Redis** (`ioredis`) for high-throughput distribut
 | **WebSockets**              | [Socket.IO 4](https://socket.io/)                                                  | Real-time multi-room bidirectional streaming    |
 | **Payments**                | [Stripe SDK](https://stripe.com/)                                                  | PaymentIntents, Checkout Sessions, Webhooks     |
 | **Media & Files**           | [Cloudinary SDK](https://cloudinary.com/)                                          | CDN storage for photos, videos, and attachments |
-| **AI Diagnostics**          | [Google Gemini 1.5](https://ai.google.dev/)                                        | Structured JSON diagnostic extraction           |
+| **AI Diagnostics**          | [Google Gemini 3.8](https://ai.google.dev/)                                        | Structured JSON diagnostic extraction           |
 | **Rate Limiting**           | [@nestjs/throttler](https://github.com/nestjs/throttler)                           | Multi-tier global IP rate limiting              |
 | **API Documentation**       | [Swagger / OpenAPI](https://swagger.io/)                                           | Custom Dark-Themed UI with Bearer Auth          |
 

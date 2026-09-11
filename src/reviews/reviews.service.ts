@@ -15,6 +15,7 @@ import { RequestUser } from 'src/common/decorator/currentUser.decorator';
 import { getPagination } from 'src/common/utils/pagination';
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { RedisService } from 'src/redis';
 import { CreateReviewDto } from './dto/create-review.dto';
 import { ModerateReviewDto, ReviewListQueryDto } from './dto/review-list-query.dto';
 
@@ -25,7 +26,36 @@ export class ReviewsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    private readonly redis: RedisService,
   ) {}
+
+  /**
+   * Product payloads now embed review stats, so any review mutation must drop the
+   * cached product detail/list entries or the catalog would serve stale ratings.
+   */
+  private async invalidateProductReviewCache(productId?: string | null) {
+    try {
+      if (productId) {
+        await this.redis.deleteByPattern(
+          `store:products:detail:${productId.toLowerCase()}*`,
+        );
+        const product = await this.prisma.product.findUnique({
+          where: { id: productId },
+          select: { sku: true },
+        });
+        if (product?.sku) {
+          await this.redis.deleteByPattern(
+            `store:products:detail:${product.sku.toLowerCase()}*`,
+          );
+        }
+      }
+      await this.redis.deleteByPattern('store:products:list:*');
+    } catch (err: any) {
+      this.logger.warn(
+        `Product review cache invalidation failed: ${err.message}`,
+      );
+    }
+  }
 
   private reviewInclude() {
     return {
@@ -145,6 +175,8 @@ export class ReviewsService {
     });
 
     this.logger.log(`Customer '${customer.displayName}' submitted ${dto.type} review (${dto.rating} stars)`);
+
+    await this.invalidateProductReviewCache(review.productId);
 
     // Notify Admins
     this.notificationsService
@@ -503,7 +535,7 @@ export class ReviewsService {
       hiddenAt = new Date();
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.customerReview.update({
         where: { id },
         data: {
@@ -557,6 +589,10 @@ export class ReviewsService {
         review: updated,
       };
     });
+
+    await this.invalidateProductReviewCache(review.productId);
+
+    return result;
   }
 
   async delete(id: string) {
@@ -564,6 +600,8 @@ export class ReviewsService {
     if (!review) throw new NotFoundException('Review not found');
 
     await this.prisma.customerReview.delete({ where: { id } });
+
+    await this.invalidateProductReviewCache(review.productId);
 
     return {
       success: true,

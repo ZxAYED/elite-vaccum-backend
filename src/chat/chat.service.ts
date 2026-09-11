@@ -178,13 +178,41 @@ export class ChatService {
   ) {
     const isUserAdmin = this.isAdmin(user);
 
-    const where: Prisma.ChatConversationWhereInput = isUserAdmin
+    const scopeCondition: Prisma.ChatConversationWhereInput = isUserAdmin
       ? {}
       : {
           participants: {
             some: { userId },
           },
         };
+
+    // Matches conversation title or any participant's name/email, so a search
+    // still finds a room even when it was never given an explicit title.
+    const search = query.search?.trim();
+    const searchCondition: Prisma.ChatConversationWhereInput = search
+      ? {
+          OR: [
+            { title: { contains: search, mode: 'insensitive' } },
+            {
+              participants: {
+                some: {
+                  user: {
+                    OR: [
+                      { firstName: { contains: search, mode: 'insensitive' } },
+                      { lastName: { contains: search, mode: 'insensitive' } },
+                      { email: { contains: search, mode: 'insensitive' } },
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+        }
+      : {};
+
+    const where: Prisma.ChatConversationWhereInput = {
+      AND: [scopeCondition, searchCondition],
+    };
 
     const totalItems = await this.prisma.chatConversation.count({ where });
     const { skip, take, meta } = getPagination(query.page, query.limit, totalItems);
@@ -362,12 +390,28 @@ export class ChatService {
       }
     }
 
+    const trimmedContent = dto.content ? dto.content.trim() : '';
+    const hasText = trimmedContent.length > 0;
+    const hasAttachments = uploadedAttachments.length > 0;
+
+    if (!hasText && !hasAttachments) {
+      throw new BadRequestException('Message content or at least one attachment is required');
+    }
+
     const messageType =
       uploadedAttachments.length > 0
         ? uploadedAttachments[0].fileType.startsWith('image/')
           ? ChatMessageType.IMAGE
           : ChatMessageType.FILE
         : dto.type || ChatMessageType.TEXT;
+
+    const snippetText =
+      trimmedContent ||
+      (uploadedAttachments.length > 0
+        ? uploadedAttachments[0].fileType.startsWith('image/')
+          ? '📷 Photo'
+          : `📎 ${uploadedAttachments[0].fileName || 'Attachment'}`
+        : 'New message');
 
     const message = await this.prisma.$transaction(async (tx) => {
       // 1. Create message
@@ -376,7 +420,7 @@ export class ChatService {
           conversationId,
           senderId: user.id,
           type: messageType,
-          content: dto.content.trim(),
+          content: trimmedContent,
           attachments: {
             create: uploadedAttachments.map((att) => ({
               fileUrl: att.fileUrl,
@@ -405,7 +449,7 @@ export class ChatService {
         where: { id: conversationId },
         data: {
           lastMessageAt: new Date(),
-          lastMessageText: dto.content.trim().substring(0, 200),
+          lastMessageText: snippetText.substring(0, 200),
         },
       });
 
@@ -413,19 +457,27 @@ export class ChatService {
     });
 
     // 3. Publish to Redis PubSub for <10ms real-time multi-instance WebSocket distribution
-    await this.pubSubService.publish(REDIS_CHANNELS.CHAT_MESSAGES, {
-      conversationId,
-      message,
-    });
+    try {
+      await this.pubSubService.publish(REDIS_CHANNELS.CHAT_MESSAGES, {
+        conversationId,
+        message,
+      });
+    } catch (err: any) {
+      this.logger.warn(`Failed to publish message to Redis: ${err.message}`);
+    }
 
     // 4. Enqueue BullMQ delayed job for offline user email notifications
-    await this.chatQueue.enqueueOfflineAlert({
-      messageId: message.id,
-      conversationId,
-      senderId: user.id,
-      content: dto.content,
-      createdAt: message.createdAt.toISOString(),
-    });
+    try {
+      await this.chatQueue.enqueueOfflineAlert({
+        messageId: message.id,
+        conversationId,
+        senderId: user.id,
+        content: trimmedContent || snippetText,
+        createdAt: message.createdAt.toISOString(),
+      });
+    } catch (err: any) {
+      this.logger.warn(`Failed to enqueue offline email alert: ${err.message}`);
+    }
 
     return message;
   }

@@ -58,6 +58,18 @@ export class EmailService {
       };
     }
 
+    // Temporarily disabled: Do not send non-OTP emails to admin
+    const adminEmail = this.configService.get<string>('SMTP_USER')?.trim().toLowerCase();
+    const isToAdmin = input.to && adminEmail && input.to.trim().toLowerCase() === adminEmail;
+    const isOtp = input.subject && input.subject.toLowerCase().includes('otp');
+    if (isToAdmin && !isOtp) {
+      this.logger.debug(`Email dispatch to admin (${input.to}) is temporarily disabled/ignored.`);
+      return {
+        success: true,
+        skipped: true,
+      };
+    }
+
     try {
       const info = await mailer.transporter.sendMail({
         from: input.from ?? mailer.defaultFrom,

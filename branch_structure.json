@@ -1,0 +1,18 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "fix/invoice-payment-timing-and-docker",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "fix/invoice-payment-timing-and-docker": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "fix/invoice-payment-timing-and-docker",
+    "origin"
+  ]
+}
